@@ -218,6 +218,13 @@
 				<a class="font-semibold underline" href="/admin/import">trang Import</a>.
 			</p>
 		</section>
+	{:else if data.databaseError}
+		<section class="mt-7 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950">
+			<h2 class="font-bold">Danh bạ tạm thời chưa kết nối được</h2>
+			<p class="mt-2 text-sm leading-6">
+				Vui lòng thử lại sau. Quản trị viên cần kiểm tra kết nối Neon trong Runtime Logs của Vercel.
+			</p>
+		</section>
 	{:else if !directory.event}
 		<section class="mt-7 rounded-2xl border border-[var(--color-border)] bg-white p-5">
 			<h2 class="font-bold">Chưa có kỳ lễ nào đang hoạt động</h2>

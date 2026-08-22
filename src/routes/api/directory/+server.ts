@@ -12,5 +12,10 @@ export const GET: RequestHandler = async ({ url }) => {
 		return json({ event: null, contacts: [] });
 	}
 
-	return json(await getActiveDirectory({ query, departmentId }));
+	try {
+		return json(await getActiveDirectory({ query, departmentId }));
+	} catch (error) {
+		console.error('[directory-api] database connection failed', error);
+		return json({ error: 'Không thể kết nối cơ sở dữ liệu.' }, { status: 503 });
+	}
 };

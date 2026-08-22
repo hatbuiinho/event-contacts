@@ -17,6 +17,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 	if (!isDatabaseConfigured()) {
 		return {
 			configured: false,
+			databaseError: false,
 			isAdmin: false,
 			user: null,
 			editId: null,
@@ -28,17 +29,34 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		};
 	}
 
-	return {
-		configured: true,
-		isAdmin: locals.user?.role === 'admin',
-		user: locals.user
-			? { displayName: locals.user.displayName, username: locals.user.username }
-			: null,
-		editId,
-		query,
-		departmentId,
-		...(await getActiveDirectory({ query, departmentId }))
-	};
+	try {
+		return {
+			configured: true,
+			databaseError: false,
+			isAdmin: locals.user?.role === 'admin',
+			user: locals.user
+				? { displayName: locals.user.displayName, username: locals.user.username }
+				: null,
+			editId,
+			query,
+			departmentId,
+			...(await getActiveDirectory({ query, departmentId }))
+		};
+	} catch (error) {
+		console.error('[directory] database connection failed', error);
+		return {
+			configured: true,
+			databaseError: true,
+			isAdmin: false,
+			user: null,
+			editId: null,
+			query,
+			departmentId,
+			event: null,
+			contacts: [],
+			departments: []
+		};
+	}
 };
 
 export const actions = {
