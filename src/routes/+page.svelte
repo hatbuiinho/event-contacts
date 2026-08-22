@@ -306,18 +306,11 @@
 										href={`/login?next=${encodeURIComponent(`/?edit=${contact.id}`)}`}
 										title="Đăng nhập để sửa"
 										><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
-											><rect
-												height="11"
-												rx="2"
-												width="14"
-												x="5"
-												y="10"
-												stroke="currentColor"
-												stroke-width="1.8"
-											/><path
-												d="M8 10V7a4 4 0 0 1 8 0v3"
+											><path
+												d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3ZM14.5 7.5l3 3"
 												stroke="currentColor"
 												stroke-linecap="round"
+												stroke-linejoin="round"
 												stroke-width="1.8"
 											/></svg
 										></a
