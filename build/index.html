@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="vi">
+	<head>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+		/>
+		<meta name="text-scale" content="scale" />
+		<link href="/_app/immutable/entry/start.kHgUccYN.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DmqF5TpY.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BY8zEW6t.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.YAlA9JgB.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/xihTtKlq.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/0.903iExqf.js" rel="modulepreload">
+		
+		<link href="/_app/immutable/assets/0.CM1Hvm5G.css" rel="stylesheet">
+	</head>
+	<body data-sveltekit-preload-data="tap">
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_189hvec = {
+						base: ""
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/_app/immutable/entry/start.kHgUccYN.js"),
+						import("/_app/immutable/entry/app.YAlA9JgB.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+
+					if ('serviceWorker' in navigator) {
+						const script_url = '/service-worker.js';
+						const policy = globalThis?.window?.trustedTypes?.createPolicy(
+							'sveltekit-trusted-url',
+							{ createScriptURL(url) { return url; } }
+						);
+						const sanitised = policy?.createScriptURL(script_url) ?? script_url;
+						addEventListener('load', function () {
+							navigator.serviceWorker.register(sanitised);
+						});
+					}
+				}
+			</script>
+		</div>
+	</body>
+</html>
