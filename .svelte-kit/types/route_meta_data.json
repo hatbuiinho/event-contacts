@@ -1,0 +1,17 @@
+{
+	"/": [
+		"src/routes/+page.server.ts"
+	],
+	"/admin": [
+		"src/routes/admin/+page.server.ts"
+	],
+	"/admin/import": [
+		"src/routes/admin/import/+page.server.ts"
+	],
+	"/api/directory": [
+		"src/routes/api/directory/+server.ts"
+	],
+	"/login": [
+		"src/routes/login/+page.server.ts"
+	]
+}

@@ -1,0 +1,1 @@
+function e(e){return e.normalize(`NFD`).replace(/[\u0300-\u036f]/g,``).replace(/đ/g,`d`).replace(/Đ/g,`D`).toLocaleLowerCase(`vi-VN`).replace(/[^\p{L}\p{N}]+/gu,` `).trim().replace(/\s+/g,` `)}export{e as t};
