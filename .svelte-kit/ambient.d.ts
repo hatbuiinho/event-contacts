@@ -140,7 +140,6 @@ declare module '$env/static/private' {
 	export const USER: string;
 	export const TERM: string;
 	export const TMPDIR: string;
-	export const npm_package_devDependencies__sveltejs_kit: string;
 	export const npm_package_devDependencies_typescript_eslint: string;
 	export const npm_node_execpath: string;
 	export const APPLICATION_INSIGHTS_NO_STATSBEAT: string;
@@ -150,6 +149,7 @@ declare module '$env/static/private' {
 	export const npm_package_scripts_lint: string;
 	export const VSCODE_PID: string;
 	export const NO_COLOR: string;
+	export const npm_package_dependencies__sveltejs_kit: string;
 	export const npm_config_strict_ssl: string;
 	export const npm_package_devDependencies__tailwindcss_forms: string;
 	export const NODE: string;
@@ -363,7 +363,6 @@ declare module '$env/dynamic/private' {
 		USER: string;
 		TERM: string;
 		TMPDIR: string;
-		npm_package_devDependencies__sveltejs_kit: string;
 		npm_package_devDependencies_typescript_eslint: string;
 		npm_node_execpath: string;
 		APPLICATION_INSIGHTS_NO_STATSBEAT: string;
@@ -373,6 +372,7 @@ declare module '$env/dynamic/private' {
 		npm_package_scripts_lint: string;
 		VSCODE_PID: string;
 		NO_COLOR: string;
+		npm_package_dependencies__sveltejs_kit: string;
 		npm_config_strict_ssl: string;
 		npm_package_devDependencies__tailwindcss_forms: string;
 		NODE: string;

@@ -26,7 +26,7 @@ export const options = {
 		app: ({ head, body, assets, nonce, env }) => "<!doctype html>\n<html lang=\"vi\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta\n\t\t\tname=\"viewport\"\n\t\t\tcontent=\"width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover\"\n\t\t/>\n\t\t<meta name=\"text-scale\" content=\"scale\" />\n\t\t" + head + "\n\t</head>\n\t<body data-sveltekit-preload-data=\"tap\">\n\t\t<div style=\"display: contents\">" + body + "</div>\n\t</body>\n</html>\n",
 		error
 	},
-	version_hash: "hi3axm"
+	version_hash: "vev3mg"
 };
 
 export async function get_hooks() {
