@@ -38,3 +38,5 @@ be/storage/ota/**/latest.json
 # Vite temp
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+.svelte-kit/
