@@ -28,6 +28,7 @@
 	let editContactId = $state<string | null>(null);
 	let copiedContactId = $state<string | null>(null);
 	let profileMenuOpen = $state(false);
+	let profileMenuElement = $state<HTMLElement | null>(null);
 	let topbarElement = $state<HTMLElement | null>(null);
 	let stickyGroupOffset = $state(0);
 	let departmentHeaderHeights = $state<Record<string, number>>({});
@@ -160,6 +161,12 @@
 		return { destroy: () => observer.disconnect() };
 	}
 
+	function closeProfileMenuWhenFocusLeaves(event: FocusEvent) {
+		const nextTarget = event.relatedTarget;
+		if (nextTarget instanceof Node && profileMenuElement?.contains(nextTarget)) return;
+		profileMenuOpen = false;
+	}
+
 	async function copyPhone(contactId: string, phone: string) {
 		try {
 			await navigator.clipboard.writeText(phone);
@@ -200,7 +207,11 @@
 				</div>
 			</div>
 			{#if data.user}
-				<div class="relative shrink-0">
+				<div
+					bind:this={profileMenuElement}
+					class="relative shrink-0"
+					onfocusout={closeProfileMenuWhenFocusLeaves}
+				>
 					<button
 						aria-expanded={profileMenuOpen}
 						aria-haspopup="menu"

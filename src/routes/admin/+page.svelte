@@ -8,6 +8,7 @@
 	let activeTab = $state<Tab>('contacts');
 	let contactQuery = $state('');
 	let profileMenuOpen = $state(false);
+	let profileMenuElement = $state<HTMLElement | null>(null);
 	let selectedContactId = $state<string | null>(null);
 	let isAddingContact = $state(false);
 	let newContacts = $state([{ displayName: '', phone: '' }]);
@@ -158,6 +159,11 @@
 		if (nextTarget instanceof Node && departmentPopover?.contains(nextTarget)) return;
 		departmentPopover?.removeAttribute('open');
 	}
+	function closeProfileMenuWhenFocusLeaves(event: FocusEvent) {
+		const nextTarget = event.relatedTarget;
+		if (nextTarget instanceof Node && profileMenuElement?.contains(nextTarget)) return;
+		profileMenuOpen = false;
+	}
 </script>
 
 <svelte:head
@@ -196,7 +202,11 @@
 					<h1 class="truncate text-lg font-bold">{data.event?.name ?? 'Danh bạ'}</h1>
 				</div>
 			{/if}
-			<div class="relative flex shrink-0 items-center gap-2">
+			<div
+				bind:this={profileMenuElement}
+				class="relative flex shrink-0 items-center gap-2"
+				onfocusout={closeProfileMenuWhenFocusLeaves}
+			>
 				<button
 					aria-expanded={profileMenuOpen}
 					aria-haspopup="menu"
