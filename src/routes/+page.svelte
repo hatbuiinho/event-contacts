@@ -30,6 +30,7 @@
 	let profileMenuOpen = $state(false);
 	let topbarElement = $state<HTMLElement | null>(null);
 	let stickyGroupOffset = $state(0);
+	let departmentHeaderHeights = $state<Record<string, number>>({});
 	let textSearchPattern = $derived(createNormalizedSearchPattern(query));
 	let editingContact = $derived(
 		directory.contacts.find((contact) => contact.id === (editContactId ?? data.editId)) ?? null
@@ -130,13 +131,34 @@
 
 	onMount(() => {
 		const updateOffset = () => {
-			stickyGroupOffset = topbarElement?.offsetHeight ?? 0;
+			stickyGroupOffset = Math.ceil(topbarElement?.getBoundingClientRect().height ?? 0);
 		};
 		const observer = new ResizeObserver(updateOffset);
+		const viewport = window.visualViewport;
 		if (topbarElement) observer.observe(topbarElement);
+		viewport?.addEventListener('resize', updateOffset);
+		viewport?.addEventListener('scroll', updateOffset);
+		window.addEventListener('orientationchange', updateOffset);
 		updateOffset();
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			viewport?.removeEventListener('resize', updateOffset);
+			viewport?.removeEventListener('scroll', updateOffset);
+			window.removeEventListener('orientationchange', updateOffset);
+		};
 	});
+
+	function measureDepartmentHeader(node: HTMLElement, departmentId: string) {
+		const updateHeight = () => {
+			const height = Math.ceil(node.getBoundingClientRect().height);
+			if (departmentHeaderHeights[departmentId] === height) return;
+			departmentHeaderHeights = { ...departmentHeaderHeights, [departmentId]: height };
+		};
+		const observer = new ResizeObserver(updateHeight);
+		observer.observe(node);
+		updateHeight();
+		return { destroy: () => observer.disconnect() };
+	}
 
 	async function copyPhone(contactId: string, phone: string) {
 		try {
@@ -339,6 +361,7 @@
 				{#each contactGroups as group}
 					<section>
 						<h2
+							use:measureDepartmentHeader={group.department.id}
 							class="sticky z-10 border-y border-[color:color-mix(in_srgb,var(--color-primary)_22%,var(--color-border))] bg-[var(--color-primary-soft)] px-3 py-2 text-xs font-bold tracking-wide text-[var(--color-primary-dark)] uppercase shadow-[0_1px_2px_rgb(24_32_28_/_0.06)] sm:px-4"
 							style:top={`${stickyGroupOffset}px`}
 						>
@@ -350,7 +373,7 @@
 							{#if roleGroup.role}
 								<h3
 									class="sticky z-[9] border-b border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-text-secondary)] shadow-[0_1px_2px_rgb(24_32_28_/_0.04)] sm:px-4"
-									style:top={`${stickyGroupOffset + 33}px`}
+									style:top={`${stickyGroupOffset + (departmentHeaderHeights[group.department.id] ?? 33)}px`}
 								>
 									{#each highlightNormalizedText(roleGroup.role, query) as part}{#if part.highlighted}<mark
 												class="rounded bg-amber-200 px-0.5 text-inherit">{part.value}</mark
