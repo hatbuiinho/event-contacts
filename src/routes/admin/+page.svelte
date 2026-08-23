@@ -13,13 +13,28 @@
 	let newContacts = $state([{ displayName: '', phone: '' }]);
 	let bulkContactIds = $state<string[]>([]);
 	let bulkDepartmentIds = $state<string[]>([]);
+	let membershipDepartmentId = $state('');
 	let departmentPopover = $state<HTMLDetailsElement | null>(null);
 	// svelte-ignore state_referenced_locally
 	let departmentOrder = $state([...data.departments]);
+	// svelte-ignore state_referenced_locally
+	let groupOrder = $state([...data.groups]);
 	let draggedDepartmentId = $state<string | null>(null);
 	let dragOverDepartmentId = $state<string | null>(null);
+	let draggedGroupId = $state<string | null>(null);
+	let dragOverGroupId = $state<string | null>(null);
+	let expandedDepartmentIds = $state<string[]>([]);
+	let departmentMenuId = $state<string | null>(null);
+	let groupMenuId = $state<string | null>(null);
+	let addingDepartment = $state(false);
+	let addingGroupDepartmentId = $state<string | null>(null);
+	let editingDepartmentId = $state<string | null>(null);
+	let editingGroupId = $state<string | null>(null);
 	let selectedContact = $derived(
 		data.contacts.find((contact) => contact.id === selectedContactId) ?? null
+	);
+	let availableGroups = $derived(
+		data.groups.filter((group) => group.departmentId === membershipDepartmentId)
 	);
 	let isContactDetail = $derived(isAddingContact || selectedContact !== null);
 	let filteredContacts = $derived.by(() => {
@@ -67,6 +82,28 @@
 			? [...new Set([...bulkContactIds, ...visibleIds])]
 			: bulkContactIds.filter((id) => !visibleIds.includes(id));
 	}
+	function toggleDepartment(id: string) {
+		expandedDepartmentIds = expandedDepartmentIds.includes(id)
+			? expandedDepartmentIds.filter((departmentId) => departmentId !== id)
+			: [...expandedDepartmentIds, id];
+	}
+	function departmentContactCount(departmentId: string) {
+		return data.contacts.filter((contact) =>
+			contact.memberships.some((membership) => membership.departmentId === departmentId)
+		).length;
+	}
+	function groupContactCount(groupId: string) {
+		return data.contacts.filter((contact) =>
+			contact.memberships.some((membership) => membership.groupId === groupId)
+		).length;
+	}
+	function ungroupedContactCount(departmentId: string) {
+		return data.contacts.filter((contact) =>
+			contact.memberships.some(
+				(membership) => membership.departmentId === departmentId && !membership.groupId
+			)
+		).length;
+	}
 	async function moveDepartmentByDrag(targetId: string) {
 		if (!draggedDepartmentId || draggedDepartmentId === targetId) return;
 		const from = departmentOrder.findIndex((department) => department.id === draggedDepartmentId);
@@ -79,6 +116,41 @@
 		await fetch('?/reorderDepartments', {
 			method: 'POST',
 			body: new URLSearchParams({ order: JSON.stringify(next.map((department) => department.id)) })
+		});
+	}
+	async function moveGroupByDrag(targetId: string) {
+		if (!draggedGroupId || draggedGroupId === targetId) return;
+		const source = groupOrder.find((group) => group.id === draggedGroupId);
+		const target = groupOrder.find((group) => group.id === targetId);
+		if (!source || !target || source.departmentId !== target.departmentId) return;
+		const departmentGroups = groupOrder.filter(
+			(group) => group.departmentId === source.departmentId
+		);
+		const from = departmentGroups.findIndex((group) => group.id === source.id);
+		const to = departmentGroups.findIndex((group) => group.id === target.id);
+		const reorderedDepartmentGroups = [...departmentGroups];
+		const [moved] = reorderedDepartmentGroups.splice(from, 1);
+		reorderedDepartmentGroups.splice(to, 0, moved);
+		const firstGroupIndex = groupOrder.findIndex(
+			(group) => group.departmentId === source.departmentId
+		);
+		const otherDepartmentGroups = groupOrder.filter(
+			(group) => group.departmentId !== source.departmentId
+		);
+		const insertAt = groupOrder
+			.slice(0, firstGroupIndex)
+			.filter((group) => group.departmentId !== source.departmentId).length;
+		groupOrder = [
+			...otherDepartmentGroups.slice(0, insertAt),
+			...reorderedDepartmentGroups,
+			...otherDepartmentGroups.slice(insertAt)
+		];
+		await fetch('?/reorderDepartmentGroups', {
+			method: 'POST',
+			body: new URLSearchParams({
+				departmentId: source.departmentId,
+				order: JSON.stringify(reorderedDepartmentGroups.map((group) => group.id))
+			})
 		});
 	}
 	function closeDepartmentPopoverWhenFocusLeaves(event: FocusEvent) {
@@ -498,8 +570,8 @@
 											class="tag"
 											formaction="?/deleteMembership"
 											type="submit"
-											>{membership.departmentName}{membership.role
-												? ` · ${membership.role}`
+											>{membership.departmentName}{membership.groupName
+												? ` · ${membership.groupName}`
 												: ''}{membership.isSupport ? ' · Hỗ trợ' : ''} ×</button
 										>
 									</form>{/each}
@@ -509,12 +581,16 @@
 									class="field"
 									name="departmentId"
 									required
+									bind:value={membershipDepartmentId}
 									><option value="">Thêm vào tiểu ban…</option
 									>{#each data.departments as department}<option value={department.id}
 											>{department.name}</option
 										>{/each}</select
-								><input class="field" name="role" placeholder="Vai trò (không bắt buộc)" /><label
-									class="flex items-center gap-2 text-sm"
+								><select class="field" name="groupId" disabled={!membershipDepartmentId}
+									><option value="">Không thuộc nhóm nhỏ</option
+									>{#each availableGroups as group}<option value={group.id}>{group.name}</option
+										>{/each}</select
+								><label class="flex items-center gap-2 text-sm"
 									><input name="isSupport" type="checkbox" /> Hỗ trợ</label
 								><button
 									class="button-secondary sm:col-span-2"
@@ -531,12 +607,16 @@
 				</div>
 			</section>
 		{:else if activeTab === 'departments'}
-			<section class="panel p-5">
-				<h2 class="text-lg font-bold">Tiểu ban</h2>
-				<p class="mt-1 text-sm text-[var(--color-text-muted)]">
-					Xóa một tiểu ban không xóa liên hệ, chỉ xóa phân công thuộc tiểu ban đó.
-				</p>
-				<form class="mt-5 flex gap-2" method="POST">
+			<section class="panel explorer-panel p-4 sm:p-5">
+				<div class="explorer-heading">
+					<div>
+						<h2 class="text-lg font-bold">Tiểu ban</h2>
+						<p class="mt-1 text-sm text-[var(--color-text-muted)]">
+							Chạm để mở nhóm nhỏ và sắp xếp bằng tay nắm.
+						</p>
+					</div>
+				</div>
+				<form class="explorer-new mt-4 flex gap-2" method="POST">
 					<input name="eventId" type="hidden" value={data.event.id} /><input
 						class="field"
 						name="name"
@@ -553,12 +633,12 @@
 						></button
 					>
 				</form>
-				<div class="admin-list-scroll mt-5 space-y-2">
-					{#each departmentOrder as department}<form
+				<div class="explorer-tree admin-list-scroll mt-4" role="tree" aria-label="Cây tiểu ban">
+					{#each departmentOrder as department}<details
+							class="tree-branch"
 							draggable="true"
 							class:drag-over={dragOverDepartmentId === department.id &&
 								draggedDepartmentId !== department.id}
-							class="flex gap-2"
 							ondragend={() => {
 								draggedDepartmentId = null;
 								dragOverDepartmentId = null;
@@ -570,42 +650,125 @@
 								event.preventDefault();
 								void moveDepartmentByDrag(department.id);
 							}}
-							method="POST"
-							onsubmit={(event) => {
-								if (
-									(event.submitter as HTMLButtonElement)?.value === 'delete' &&
-									!confirm('Xóa tiểu ban và các phân công thuộc ban này?')
-								)
-									event.preventDefault();
-							}}
 						>
-							<input name="id" type="hidden" value={department.id} /><input
-								class="field"
-								name="name"
-								value={department.name}
-								required
-							/><span class="drag-handle" aria-hidden="true">⋮⋮</span><button
-								aria-label={`Lưu ${department.name}`}
-								class="button-secondary action-icon"
-								formaction="?/updateDepartment"
-								title="Lưu"
-								type="submit"
-								><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg><span
-									class="action-label">Lưu</span
-								></button
-							><button
-								aria-label={`Xóa ${department.name}`}
-								class="button-danger action-icon"
-								formaction="?/deleteDepartment"
-								name="intent"
-								title="Xóa"
-								type="submit"
-								value="delete"
-								><svg aria-hidden="true" viewBox="0 0 24 24"
-									><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6" /></svg
-								><span class="action-label">Xóa</span></button
+							<summary class="tree-summary">
+								<svg class="tree-chevron" aria-hidden="true" viewBox="0 0 24 24"
+									><path d="m9 18 6-6-6-6" /></svg
+								>
+								<span class="tree-folder" aria-hidden="true"
+									><svg viewBox="0 0 24 24"
+										><path d="m12 2 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 17l9 5 9-5" /></svg
+									></span
+								>
+								<span class="tree-name">{department.name}</span>
+								<span class="tree-count">{departmentContactCount(department.id)}</span>
+							</summary>
+							<form
+								class="tree-editor"
+								method="POST"
+								onsubmit={(event) => {
+									if (
+										(event.submitter as HTMLButtonElement)?.value === 'delete' &&
+										!confirm('Xóa tiểu ban và các phân công thuộc ban này?')
+									)
+										event.preventDefault();
+								}}
 							>
-						</form>{/each}
+								<input name="id" type="hidden" value={department.id} /><input
+									class="field"
+									name="name"
+									value={department.name}
+									required
+								/><span class="drag-handle" aria-hidden="true">⋮⋮</span><button
+									aria-label={`Lưu ${department.name}`}
+									class="button-secondary action-icon"
+									formaction="?/updateDepartment"
+									title="Lưu"
+									type="submit"
+									><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg
+									><span class="action-label">Lưu</span></button
+								><button
+									aria-label={`Xóa ${department.name}`}
+									class="button-danger action-icon"
+									formaction="?/deleteDepartment"
+									name="intent"
+									title="Xóa"
+									type="submit"
+									value="delete"
+									><svg aria-hidden="true" viewBox="0 0 24 24"
+										><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6" /></svg
+									><span class="action-label">Xóa</span></button
+								>
+							</form>
+							<section class="tree-children">
+								<p
+									class="text-xs font-semibold tracking-wide text-[var(--color-text-secondary)] uppercase"
+								>
+									Nhóm nhỏ
+								</p>
+								<div class="mt-2 space-y-2">
+									{#each groupOrder.filter((group) => group.departmentId === department.id) as group}
+										<form
+											class:drag-over={dragOverGroupId === group.id && draggedGroupId !== group.id}
+											class="flex gap-2"
+											draggable="true"
+											method="POST"
+											ondragend={() => {
+												draggedGroupId = null;
+												dragOverGroupId = null;
+											}}
+											ondragenter={() => (dragOverGroupId = group.id)}
+											ondragover={(event) => event.preventDefault()}
+											ondragstart={() => (draggedGroupId = group.id)}
+											ondrop={(event) => {
+												event.preventDefault();
+												void moveGroupByDrag(group.id);
+											}}
+										>
+											<input name="id" type="hidden" value={group.id} />
+											<input class="field min-w-0" name="name" value={group.name} required />
+											<span class="drag-handle" aria-hidden="true">⋮⋮</span>
+											<button
+												aria-label={`Lưu ${group.name}`}
+												class="button-secondary action-icon"
+												formaction="?/updateDepartmentGroup"
+												title="Lưu nhóm"
+												type="submit"
+												><svg aria-hidden="true" viewBox="0 0 24 24"
+													><path d="m5 12 4 4L19 6" /></svg
+												><span class="action-label">Lưu</span></button
+											><button
+												aria-label={`Xóa ${group.name}`}
+												class="button-danger action-icon"
+												formaction="?/deleteDepartmentGroup"
+												onclick={(event) => {
+													if (!confirm('Xóa nhóm nhỏ? Liên hệ vẫn được giữ trong tiểu ban.'))
+														event.preventDefault();
+												}}
+												title="Xóa nhóm"
+												type="submit"
+												><svg aria-hidden="true" viewBox="0 0 24 24"
+													><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6" /></svg
+												><span class="action-label">Xóa</span></button
+											>
+										</form>
+									{/each}
+								</div>
+								<form class="mt-2 flex gap-2" method="POST">
+									<input name="departmentId" type="hidden" value={department.id} />
+									<input class="field min-w-0" name="name" placeholder="Tên nhóm nhỏ" required />
+									<button
+										aria-label={`Thêm nhóm nhỏ cho ${department.name}`}
+										class="button-secondary action-icon"
+										formaction="?/createDepartmentGroup"
+										title="Thêm nhóm"
+										type="submit"
+										><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg
+										><span class="action-label">Thêm</span></button
+									>
+								</form>
+							</section>
+						</details>{/each}
 				</div>
 			</section>
 		{:else}
@@ -654,7 +817,7 @@
 			class="bottom-item"
 			onclick={() => (activeTab = 'departments')}
 			><svg aria-hidden="true" viewBox="0 0 24 24"
-				><path d="M4 21V10m8 11V3m8 18v-7M2 10h4M10 3h4m4 11h4" /></svg
+				><path d="m12 2 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 17l9 5 9-5" /></svg
 			>Tiểu ban</button
 		>
 		<button
@@ -677,9 +840,11 @@
 	.field {
 		width: 100%;
 		border: 1px solid var(--color-border);
-		border-radius: 0.75rem;
+		border-radius: 0.65rem;
 		background: white;
-		padding: 0.7rem 0.85rem;
+		padding: 0.58rem 0.72rem;
+		font-size: 0.875rem;
+		line-height: 1.25rem;
 		outline: none;
 	}
 	.field:focus {
@@ -688,15 +853,16 @@
 	.label {
 		display: block;
 		margin-bottom: 0.35rem;
-		font-size: 0.875rem;
+		font-size: 0.8125rem;
 		font-weight: 600;
 	}
 	.button-primary,
 	.button-secondary,
 	.button-danger {
-		min-height: 2.75rem;
-		border-radius: 0.75rem;
-		padding: 0.7rem 1rem;
+		min-height: 2.5rem;
+		border-radius: 0.65rem;
+		padding: 0.58rem 0.82rem;
+		font-size: 0.875rem;
 		font-weight: 600;
 		white-space: nowrap;
 	}
@@ -768,7 +934,7 @@
 	}
 	.tab {
 		border-radius: 0.7rem;
-		padding: 0.65rem 0.85rem;
+		padding: 0.55rem 0.75rem;
 		font-weight: 600;
 		color: var(--color-text-muted);
 		white-space: nowrap;
@@ -812,6 +978,120 @@
 		max-height: min(60dvh, 38rem);
 		overflow-y: auto;
 		padding-right: 0.2rem;
+	}
+	.explorer-heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+	.explorer-panel {
+		font-size: 0.9rem;
+	}
+	.explorer-tree {
+		border-top: 1px solid var(--color-border);
+	}
+	.tree-branch {
+		border-bottom: 1px solid var(--color-border);
+	}
+	.tree-branch summary {
+		list-style: none;
+	}
+	.tree-branch summary::-webkit-details-marker {
+		display: none;
+	}
+	.tree-summary {
+		display: flex;
+		min-height: 2.9rem;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.45rem;
+	}
+	.tree-summary {
+		cursor: pointer;
+	}
+	.tree-summary:hover {
+		background: var(--color-surface);
+	}
+	.tree-chevron,
+	.tree-folder svg {
+		width: 1.1rem;
+		height: 1.1rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 2;
+	}
+	.tree-chevron {
+		color: var(--color-text-muted);
+		transition: transform 0.15s ease;
+	}
+	.tree-branch[open] > .tree-summary .tree-chevron {
+		transform: rotate(90deg);
+	}
+	.tree-folder {
+		display: grid;
+		width: 1.75rem;
+		height: 1.75rem;
+		place-items: center;
+		border-radius: 0.45rem;
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
+	}
+	.tree-name {
+		min-width: 0;
+		flex: 1;
+		font-size: 0.875rem;
+		font-weight: 650;
+		text-align: left;
+	}
+	.tree-count {
+		min-width: 1.7rem;
+		border-radius: 999px;
+		background: var(--color-surface);
+		padding: 0.12rem 0.4rem;
+		font-size: 0.75rem;
+		font-weight: 650;
+		text-align: center;
+		color: var(--color-text-muted);
+	}
+	.tree-editor {
+		display: flex;
+		gap: 0.45rem;
+		padding: 0.4rem 0.55rem 0.65rem 2.35rem;
+		background: color-mix(in srgb, var(--color-surface) 65%, white);
+	}
+	.tree-children {
+		margin-left: 1.15rem;
+		border-left: 1px solid var(--color-border);
+		padding: 0.2rem 0 0.55rem 0.45rem;
+	}
+	.tree-children > p {
+		margin: 0.35rem 0;
+	}
+	.tree-children form {
+		position: relative;
+	}
+	.tree-children form::before {
+		position: absolute;
+		top: 50%;
+		left: -0.45rem;
+		width: 0.45rem;
+		border-top: 1px solid var(--color-border);
+		content: '';
+	}
+	@media (max-width: 639px) {
+		.admin-list-scroll {
+			max-height: none;
+			overflow: visible;
+		}
+		.tree-editor {
+			padding-left: 0.55rem;
+		}
+		.tree-summary {
+			min-height: 3.1rem;
+		}
 	}
 	.tag {
 		min-height: 2.5rem;
@@ -914,22 +1194,22 @@
 		grid-template-columns: repeat(3, 1fr);
 		border-top: 1px solid var(--color-border);
 		background: color-mix(in srgb, white 94%, transparent);
-		padding: 0.45rem 0.5rem max(0.45rem, env(safe-area-inset-bottom));
+		padding: 0.3rem 0.4rem max(0.3rem, env(safe-area-inset-bottom));
 		backdrop-filter: blur(12px);
 	}
 	.bottom-item {
 		display: grid;
-		min-height: 3.5rem;
+		min-height: 3rem;
 		place-content: center;
-		gap: 0.1rem;
+		gap: 0;
 		border-radius: 0.75rem;
 		color: var(--color-text-muted);
-		font-size: 0.75rem;
+		font-size: 0.7rem;
 		font-weight: 600;
 	}
 	.bottom-item svg {
-		width: 1.2rem;
-		height: 1.2rem;
+		width: 1.1rem;
+		height: 1.1rem;
 		fill: none;
 		stroke: currentColor;
 		stroke-linecap: round;

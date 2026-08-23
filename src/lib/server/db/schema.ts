@@ -74,6 +74,29 @@ export const departments = pgTable(
 	]
 );
 
+export const departmentGroups = pgTable(
+	'department_groups',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		departmentId: uuid('department_id')
+			.notNull()
+			.references(() => departments.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		normalizedName: text('normalized_name').notNull(),
+		sortOrder: integer('sort_order').notNull().default(0),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		index('department_groups_department_idx').on(table.departmentId),
+		index('department_groups_department_sort_idx').on(table.departmentId, table.sortOrder),
+		uniqueIndex('department_groups_department_name_unique').on(
+			table.departmentId,
+			table.normalizedName
+		)
+	]
+);
+
 export const memberships = pgTable(
 	'memberships',
 	{
@@ -84,6 +107,8 @@ export const memberships = pgTable(
 		departmentId: uuid('department_id')
 			.notNull()
 			.references(() => departments.id, { onDelete: 'cascade' }),
+		groupId: uuid('group_id').references(() => departmentGroups.id, { onDelete: 'set null' }),
+		// Kept temporarily for backwards-compatible migrations; new code uses groupId.
 		role: text('role').notNull().default(''),
 		isSupport: boolean('is_support').notNull().default(false),
 		sortOrder: integer('sort_order').notNull().default(0),
@@ -94,6 +119,7 @@ export const memberships = pgTable(
 	(table) => [
 		index('memberships_contact_idx').on(table.contactId),
 		index('memberships_department_idx').on(table.departmentId),
+		index('memberships_group_idx').on(table.groupId),
 		index('memberships_department_sort_idx').on(table.departmentId, table.sortOrder),
 		uniqueIndex('memberships_assignment_unique').on(table.contactId, table.departmentId, table.role)
 	]

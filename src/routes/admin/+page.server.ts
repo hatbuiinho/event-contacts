@@ -4,7 +4,13 @@ import { fail } from '@sveltejs/kit';
 import { normalizePhone, normalizeText } from '$lib/contacts/normalize';
 import { requireAdmin } from '$lib/server/auth/guard';
 import { getDb } from '$lib/server/db/client';
-import { contacts, departments, events, memberships } from '$lib/server/db/schema';
+import {
+	contacts,
+	departmentGroups,
+	departments,
+	events,
+	memberships
+} from '$lib/server/db/schema';
 
 import type { Actions, PageServerLoad } from './$types';
 
@@ -16,9 +22,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 		.from(events)
 		.where(eq(events.status, 'active'))
 		.limit(1);
-	if (!event) return { user, event: null, contacts: [], departments: [] };
+	if (!event) return { user, event: null, contacts: [], departments: [], groups: [] };
 
-	const [eventContacts, eventDepartments, assignmentRows] = await Promise.all([
+	const [eventContacts, eventDepartments, eventGroups, assignmentRows] = await Promise.all([
 		db
 			.select({
 				id: contacts.id,
@@ -42,16 +48,29 @@ export const load: PageServerLoad = async ({ locals }) => {
 			.orderBy(asc(departments.sortOrder), asc(departments.name)),
 		db
 			.select({
+				id: departmentGroups.id,
+				departmentId: departmentGroups.departmentId,
+				name: departmentGroups.name,
+				sortOrder: departmentGroups.sortOrder
+			})
+			.from(departmentGroups)
+			.innerJoin(departments, eq(departments.id, departmentGroups.departmentId))
+			.where(eq(departments.eventId, event.id))
+			.orderBy(asc(departments.sortOrder), asc(departmentGroups.sortOrder)),
+		db
+			.select({
 				id: memberships.id,
 				contactId: memberships.contactId,
 				departmentId: memberships.departmentId,
 				departmentName: departments.name,
-				role: memberships.role,
+				groupId: memberships.groupId,
+				groupName: departmentGroups.name,
 				isSupport: memberships.isSupport,
 				sortOrder: memberships.sortOrder
 			})
 			.from(memberships)
 			.innerJoin(departments, eq(departments.id, memberships.departmentId))
+			.leftJoin(departmentGroups, eq(departmentGroups.id, memberships.groupId))
 			.where(eq(departments.eventId, event.id))
 			.orderBy(asc(departments.sortOrder), asc(memberships.sortOrder))
 	]);
@@ -76,6 +95,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 		user,
 		event,
 		departments: eventDepartments,
+		groups: eventGroups,
 		contacts: eventContacts.map((contact) => ({
 			...contact,
 			memberships: membershipsByContact.get(contact.id) ?? []
@@ -361,15 +381,25 @@ export const actions = {
 		const form = await request.formData();
 		const contactId = value(form, 'contactId');
 		const departmentId = value(form, 'departmentId');
-		const role = value(form, 'role');
+		const groupId = value(form, 'groupId') || null;
 		if (!contactId || !departmentId) return fail(400, { error: 'Chọn liên hệ và tiểu ban.' });
+		if (groupId) {
+			const [group] = await getDb()
+				.select({ id: departmentGroups.id })
+				.from(departmentGroups)
+				.where(
+					and(eq(departmentGroups.id, groupId), eq(departmentGroups.departmentId, departmentId))
+				)
+				.limit(1);
+			if (!group) return fail(400, { error: 'Nhóm nhỏ không thuộc tiểu ban đã chọn.' });
+		}
 		try {
 			await getDb()
 				.insert(memberships)
 				.values({
 					contactId,
 					departmentId,
-					role,
+					groupId,
 					isSupport: form.get('isSupport') === 'on',
 					sortOrder: await getNextMembershipSortOrder(departmentId)
 				});
@@ -377,6 +407,77 @@ export const actions = {
 		} catch {
 			return fail(400, { error: 'Phân công này đã tồn tại.' });
 		}
+	},
+	createDepartmentGroup: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const form = await request.formData();
+		const departmentId = value(form, 'departmentId');
+		const name = value(form, 'name');
+		if (!departmentId || !name) return fail(400, { error: 'Nhập tên nhóm nhỏ.' });
+		try {
+			await getDb()
+				.insert(departmentGroups)
+				.values({
+					departmentId,
+					name,
+					normalizedName: normalizeText(name),
+					sortOrder: await getNextGroupSortOrder(departmentId)
+				});
+			return { success: 'Đã thêm nhóm nhỏ.' };
+		} catch {
+			return fail(400, { error: 'Nhóm nhỏ này đã tồn tại trong tiểu ban.' });
+		}
+	},
+	updateDepartmentGroup: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const form = await request.formData();
+		const id = value(form, 'id');
+		const name = value(form, 'name');
+		if (!id || !name) return fail(400, { error: 'Nhập tên nhóm nhỏ.' });
+		try {
+			await getDb()
+				.update(departmentGroups)
+				.set({ name, normalizedName: normalizeText(name), updatedAt: new Date() })
+				.where(eq(departmentGroups.id, id));
+			return { success: 'Đã cập nhật nhóm nhỏ và các phân công liên quan.' };
+		} catch {
+			return fail(400, { error: 'Nhóm nhỏ này đã tồn tại trong tiểu ban.' });
+		}
+	},
+	deleteDepartmentGroup: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const id = value(await request.formData(), 'id');
+		if (!id) return fail(400, { error: 'Không tìm thấy nhóm nhỏ.' });
+		await getDb().delete(departmentGroups).where(eq(departmentGroups.id, id));
+		return { success: 'Đã xóa nhóm nhỏ. Liên hệ vẫn thuộc tiểu ban.' };
+	},
+	reorderDepartmentGroups: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const form = await request.formData();
+		const departmentId = value(form, 'departmentId');
+		const ids = selectedIds(form, 'order');
+		if (!departmentId || ids.length === 0)
+			return fail(400, { error: 'Thứ tự nhóm nhỏ không hợp lệ.' });
+		const db = getDb();
+		const existing = await db
+			.select({ id: departmentGroups.id })
+			.from(departmentGroups)
+			.where(eq(departmentGroups.departmentId, departmentId));
+		if (
+			ids.length !== existing.length ||
+			ids.some((id) => !existing.some((group) => group.id === id))
+		)
+			return fail(400, { error: 'Thứ tự nhóm nhỏ không hợp lệ.' });
+		const updates = ids.map((id, sortOrder) =>
+			db
+				.update(departmentGroups)
+				.set({ sortOrder, updatedAt: new Date() })
+				.where(eq(departmentGroups.id, id))
+		);
+		const [firstUpdate, ...remainingUpdates] = updates;
+		if (!firstUpdate) return fail(400, { error: 'Thứ tự nhóm nhỏ không hợp lệ.' });
+		await db.batch([firstUpdate, ...remainingUpdates]);
+		return { success: 'Đã cập nhật thứ tự nhóm nhỏ.' };
 	},
 	deleteMembership: async ({ locals, request }) => {
 		requireAdmin(locals, '/admin');
@@ -427,6 +528,16 @@ async function getNextMembershipSortOrder(departmentId: string) {
 		.orderBy(desc(memberships.sortOrder))
 		.limit(1);
 	return (lastMembership?.sortOrder ?? -1) + 1;
+}
+
+async function getNextGroupSortOrder(departmentId: string) {
+	const [lastGroup] = await getDb()
+		.select({ sortOrder: departmentGroups.sortOrder })
+		.from(departmentGroups)
+		.where(eq(departmentGroups.departmentId, departmentId))
+		.orderBy(desc(departmentGroups.sortOrder))
+		.limit(1);
+	return (lastGroup?.sortOrder ?? -1) + 1;
 }
 
 function contactInput(form: FormData) {

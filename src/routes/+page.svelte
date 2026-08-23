@@ -10,6 +10,9 @@
 
 	let { data }: { data: PageData } = $props();
 	type Directory = Pick<PageData, 'contacts' | 'departments' | 'event'>;
+	type DirectoryContact = Directory['contacts'][number];
+	type ContactMembership = DirectoryContact['departments'][number];
+	type DisplayAssignment = { contact: DirectoryContact; membership: ContactMembership };
 	// The full active directory is intentionally used only from the initial SSR response.
 	// Searching and filtering are then instant and do not require a Neon round trip.
 	// svelte-ignore state_referenced_locally
@@ -47,7 +50,9 @@
 				(textSearchPattern &&
 					(textSearchPattern.test(normalizeText(contact.displayName)) ||
 						contact.departments.some((department) =>
-							textSearchPattern.test(normalizeText(`${department.name} ${department.role}`))
+							textSearchPattern.test(
+								normalizeText(`${department.name} ${department.groupName ?? ''}`)
+							)
 						))) ||
 				(phoneQuery && contact.phoneDigits?.includes(phoneQuery))
 			);
@@ -56,7 +61,7 @@
 	let contactGroups = $derived.by(() => {
 		const groups = directory.departments.map((department) => ({
 			department,
-			contacts: [] as typeof filteredContacts
+			assignments: [] as DisplayAssignment[]
 		}));
 		const groupByDepartmentId = new Map(groups.map((group) => [group.department.id, group]));
 
@@ -71,31 +76,39 @@
 					: contact.departments.slice(0, 1);
 
 			for (const membership of memberships) {
-				groupByDepartmentId.get(membership.id)?.contacts.push(contact);
+				groupByDepartmentId.get(membership.id)?.assignments.push({ contact, membership });
 			}
 		}
 
 		for (const group of groups) {
-			group.contacts.sort((first, second) => {
-				const firstOrder =
-					first.departments.find((item) => item.id === group.department.id)?.sortOrder ?? 0;
-				const secondOrder =
-					second.departments.find((item) => item.id === group.department.id)?.sortOrder ?? 0;
-				return firstOrder - secondOrder;
-			});
+			group.assignments.sort(
+				(first, second) => first.membership.sortOrder - second.membership.sortOrder
+			);
 		}
 		return groups
-			.filter((group) => group.contacts.length > 0)
+			.filter((group) => group.assignments.length > 0)
 			.map((group) => {
-				const roleGroups = new Map<string, { role: string; contacts: typeof filteredContacts }>();
-				for (const contact of group.contacts) {
-					const membership = contact.departments.find((item) => item.id === group.department.id);
-					const role = membership?.role ?? '';
-					const roleGroup = roleGroups.get(role) ?? { role, contacts: [] };
-					roleGroup.contacts.push(contact);
-					roleGroups.set(role, roleGroup);
+				const roleGroups = new Map<
+					string,
+					{ role: string; sortOrder: number; contacts: DirectoryContact[] }
+				>();
+				for (const assignment of group.assignments) {
+					const role = assignment.membership.groupName ?? '';
+					const groupKey = assignment.membership.groupId ?? '';
+					const roleGroup = roleGroups.get(groupKey) ?? {
+						role,
+						sortOrder: assignment.membership.groupSortOrder ?? Number.MAX_SAFE_INTEGER,
+						contacts: []
+					};
+					roleGroup.contacts.push(assignment.contact);
+					roleGroups.set(groupKey, roleGroup);
 				}
-				return { department: group.department, roleGroups: [...roleGroups.values()] };
+				return {
+					department: group.department,
+					roleGroups: [...roleGroups.values()].sort(
+						(first, second) => first.sortOrder - second.sortOrder
+					)
+				};
 			});
 	});
 	let displayedAssignmentCount = $derived(

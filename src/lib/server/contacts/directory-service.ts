@@ -2,14 +2,28 @@ import { and, asc, eq, ilike, like, or } from 'drizzle-orm';
 
 import { normalizeText } from '$lib/contacts/normalize';
 import { getDb } from '$lib/server/db/client';
-import { contacts, departments, events, memberships } from '$lib/server/db/schema';
+import {
+	contacts,
+	departmentGroups,
+	departments,
+	events,
+	memberships
+} from '$lib/server/db/schema';
 
 export type DirectoryContact = {
 	id: string;
 	displayName: string;
 	phoneDisplay: string | null;
 	phoneDigits: string | null;
-	departments: { id: string; name: string; role: string; isSupport: boolean; sortOrder: number }[];
+	departments: {
+		id: string;
+		name: string;
+		groupId: string | null;
+		groupName: string | null;
+		groupSortOrder: number | null;
+		isSupport: boolean;
+		sortOrder: number;
+	}[];
 };
 
 export async function getActiveDirectory(input: { query: string; departmentId: string | null }) {
@@ -37,7 +51,8 @@ export async function getActiveDirectory(input: { query: string; departmentId: s
 		if (normalizedQuery) {
 			searchPredicates.push(
 				ilike(contacts.normalizedName, `%${normalizedQuery}%`),
-				ilike(departments.normalizedName, `%${normalizedQuery}%`)
+				ilike(departments.normalizedName, `%${normalizedQuery}%`),
+				ilike(departmentGroups.normalizedName, `%${normalizedQuery}%`)
 			);
 		}
 		if (phoneQuery) searchPredicates.push(like(contacts.phoneDigits, `%${phoneQuery}%`));
@@ -53,13 +68,16 @@ export async function getActiveDirectory(input: { query: string; departmentId: s
 			phoneDigits: contacts.phoneDigits,
 			departmentId: departments.id,
 			departmentName: departments.name,
-			role: memberships.role,
+			groupId: memberships.groupId,
+			groupName: departmentGroups.name,
+			groupSortOrder: departmentGroups.sortOrder,
 			isSupport: memberships.isSupport,
 			membershipSortOrder: memberships.sortOrder
 		})
 		.from(contacts)
 		.innerJoin(memberships, eq(memberships.contactId, contacts.id))
 		.innerJoin(departments, eq(departments.id, memberships.departmentId))
+		.leftJoin(departmentGroups, eq(departmentGroups.id, memberships.groupId))
 		.where(and(...predicates))
 		.orderBy(asc(departments.sortOrder), asc(memberships.sortOrder), asc(contacts.displayName));
 
@@ -75,7 +93,9 @@ export async function getActiveDirectory(input: { query: string; departmentId: s
 		contact.departments.push({
 			id: row.departmentId,
 			name: row.departmentName,
-			role: row.role,
+			groupId: row.groupId,
+			groupName: row.groupName,
+			groupSortOrder: row.groupSortOrder,
 			isSupport: row.isSupport,
 			sortOrder: row.membershipSortOrder
 		});

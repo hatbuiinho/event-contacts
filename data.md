@@ -96,6 +96,17 @@ Thầy Toàn Hảo – 0868.969.833
 - Rửa Chén (Cư sĩ):
   + CS Tĩnh Hương Quy – 0799.444.276
   + CS Viên Nghiêm Chiêu – 0961.154.309
+- Bếp:
+  + SC01 - Chưa có SDT
+  + SC02 - Chưa có SDT
+  + SC03 - Chưa có SDT
+  + SC04 - Chưa có SDT
+  + SC05 - Chưa có SDT
+  + SC06 - Chưa có SDT
+  + SC07 - Chưa có SDT
+  + SC08 - Chưa có SDT
+  + SC09 - Chưa có SDT
+  + SC10 - Chưa có SDT
 
 8. TIỂU BAN TRI KHỐ
 - Kiểm Soát Đồ (Cư sĩ):
@@ -291,4 +302,4 @@ TRỰC NHÀ TĂNG, QUẢN LÝ CHÚ TIỂU
   + Chú Pháp Hóa – 0966.296.489
   + Chú Pháp Kiên – 0925.648.864
   + Chú Pháp Chương – 0366.435.833
-  + Chú Pháp Tuyên – 0868.693.896
+  + Chú Pháp Tuyên – 0868.693.896  

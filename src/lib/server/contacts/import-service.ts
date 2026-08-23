@@ -2,7 +2,14 @@ import { and, eq } from 'drizzle-orm';
 
 import { prepareAssignmentImport, type ImportPreview } from '$lib/contacts/import-plan';
 import { getDb } from '$lib/server/db/client';
-import { contacts, departments, events, importBatches, memberships } from '$lib/server/db/schema';
+import {
+	contacts,
+	departmentGroups,
+	departments,
+	events,
+	importBatches,
+	memberships
+} from '$lib/server/db/schema';
 
 export function previewImport(raw: string): ImportPreview {
 	return prepareAssignmentImport(raw);
@@ -29,6 +36,7 @@ export async function createDraftEventFromImport(input: {
 		...prepared.departments.map((department) =>
 			db.insert(departments).values({ ...department, eventId })
 		),
+		...prepared.groups.map((group) => db.insert(departmentGroups).values(group)),
 		...prepared.memberships.map((membership) => db.insert(memberships).values(membership)),
 		db.insert(importBatches).values({
 			id: crypto.randomUUID(),

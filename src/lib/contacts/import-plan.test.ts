@@ -20,3 +20,16 @@ test('groups one contact into multiple departments while preserving assignments'
 	assert.equal(prepared.needsReviewCount, 1);
 	assert.equal(prepared.duplicateAssignmentCount, 0);
 });
+
+test('turns imported role headings into reusable department groups', () => {
+	const prepared = prepareAssignmentImport(`
+1. TIỂU BAN ĐIỀU PHỐI
+- Điều phối chung:
++ Chú Pháp Chân – 0367.827.680
++ Cô An – 0900.000.001
+`);
+
+	assert.equal(prepared.groups.length, 1);
+	assert.equal(prepared.groups[0]?.name, 'Điều phối chung');
+	assert.equal(prepared.memberships.every((membership) => membership.groupId === prepared.groups[0]?.id), true);
+});
