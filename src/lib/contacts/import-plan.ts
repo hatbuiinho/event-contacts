@@ -26,6 +26,7 @@ export type PreparedMembership = {
 	departmentId: string;
 	role: string;
 	isSupport: boolean;
+	sortOrder: number;
 };
 
 export type ImportPreview = {
@@ -48,6 +49,7 @@ export function prepareAssignmentImport(raw: string): PreparedImport {
 	const contactsByKey = new Map<string, PreparedContact>();
 	const departmentsByName = new Map<string, PreparedDepartment>();
 	const membershipsByKey = new Map<string, PreparedMembership>();
+	const membershipCountByDepartment = new Map<string, number>();
 	let missingPhoneCount = 0;
 	let needsReviewCount = 0;
 
@@ -61,13 +63,16 @@ export function prepareAssignmentImport(raw: string): PreparedImport {
 
 		const membershipKey = `${contact.id}:${department.id}:${assignment.role}`;
 		if (!membershipsByKey.has(membershipKey)) {
+			const sortOrder = membershipCountByDepartment.get(department.id) ?? 0;
 			membershipsByKey.set(membershipKey, {
 				id: crypto.randomUUID(),
 				contactId: contact.id,
 				departmentId: department.id,
 				role: assignment.role,
-				isSupport: assignment.isSupport
+				isSupport: assignment.isSupport,
+				sortOrder
 			});
+			membershipCountByDepartment.set(department.id, sortOrder + 1);
 		}
 	}
 

@@ -86,6 +86,7 @@ export const memberships = pgTable(
 			.references(() => departments.id, { onDelete: 'cascade' }),
 		role: text('role').notNull().default(''),
 		isSupport: boolean('is_support').notNull().default(false),
+		sortOrder: integer('sort_order').notNull().default(0),
 		notes: text('notes'),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
@@ -93,6 +94,7 @@ export const memberships = pgTable(
 	(table) => [
 		index('memberships_contact_idx').on(table.contactId),
 		index('memberships_department_idx').on(table.departmentId),
+		index('memberships_department_sort_idx').on(table.departmentId, table.sortOrder),
 		uniqueIndex('memberships_assignment_unique').on(table.contactId, table.departmentId, table.role)
 	]
 );

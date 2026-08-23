@@ -47,8 +47,19 @@
 				/>
 			</label>
 			<button
-				class="w-full rounded-xl bg-[var(--color-primary)] px-4 py-3 font-semibold text-white"
-				type="submit">Đăng nhập</button
+				aria-label="Đăng nhập"
+				class="grid size-12 place-items-center rounded-xl bg-[var(--color-primary)] font-semibold text-white sm:flex sm:w-full sm:justify-center sm:gap-2 sm:px-4 sm:py-3"
+				title="Đăng nhập"
+				type="submit"
+				><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
+					><path
+						d="M10 17l5-5-5-5M15 12H3m11-7h4a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-4"
+						stroke="currentColor"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="1.8"
+					/></svg
+				><span class="hidden sm:inline">Đăng nhập</span></button
 			>
 		</form>
 	</section>

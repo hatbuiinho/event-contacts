@@ -1,67 +1,139 @@
 <script lang="ts">
-	import { normalizeText } from '$lib/contacts/normalize';
+	import { onMount } from 'svelte';
+	import {
+		createNormalizedSearchPattern,
+		highlightNormalizedText,
+		highlightPhoneText,
+		normalizeText
+	} from '$lib/contacts/normalize';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-	type Directory = Pick<PageData, 'contacts' | 'event'>;
-	// The page data is intentionally used only for the initial SSR render. Subsequent searches use the API.
+	type Directory = Pick<PageData, 'contacts' | 'departments' | 'event'>;
+	// The full active directory is intentionally used only from the initial SSR response.
+	// Searching and filtering are then instant and do not require a Neon round trip.
 	// svelte-ignore state_referenced_locally
 	const initialData = $state.snapshot(data);
 
 	let query = $state(initialData.query);
 	let departmentId = $state(initialData.departmentId ?? '');
-	let directory = $state<Directory>({ contacts: initialData.contacts, event: initialData.event });
-	let isSearching = $state(false);
-	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-	let requestId = 0;
+	let directory = $state<Directory>({
+		contacts: initialData.contacts,
+		departments: initialData.departments,
+		event: initialData.event
+	});
 	let editContactId = $state<string | null>(null);
+	let copiedContactId = $state<string | null>(null);
 	let profileMenuOpen = $state(false);
+	let topbarElement = $state<HTMLElement | null>(null);
+	let stickyGroupOffset = $state(0);
+	let textSearchPattern = $derived(createNormalizedSearchPattern(query));
 	let editingContact = $derived(
 		directory.contacts.find((contact) => contact.id === (editContactId ?? data.editId)) ?? null
 	);
+	let filteredContacts = $derived.by(() => {
+		const phoneQuery = query.replace(/\D/g, '');
 
-	function scheduleSearch() {
-		if (debounceTimer) clearTimeout(debounceTimer);
-		debounceTimer = setTimeout(search, 250);
-	}
+		return directory.contacts.filter((contact) => {
+			if (
+				departmentId &&
+				!contact.departments.some((department) => department.id === departmentId)
+			) {
+				return false;
+			}
+			if (!textSearchPattern && !phoneQuery) return true;
 
-	function highlightedParts(value: string) {
-		const tokens = query.trim().split(/\s+/).filter(Boolean);
-		if (tokens.length === 0) return [{ value, highlighted: false }];
-		const expression = new RegExp(`(${tokens.map(escapeRegExp).join('|')})`, 'gi');
-		return value
-			.split(expression)
-			.filter(Boolean)
-			.map((part) => ({
-				value: part,
-				highlighted: tokens.some((token) => normalizeText(token) === normalizeText(part))
-			}));
-	}
+			return (
+				(textSearchPattern &&
+					(textSearchPattern.test(normalizeText(contact.displayName)) ||
+						contact.departments.some((department) =>
+							textSearchPattern.test(normalizeText(`${department.name} ${department.role}`))
+						))) ||
+				(phoneQuery && contact.phoneDigits?.includes(phoneQuery))
+			);
+		});
+	});
+	let contactGroups = $derived.by(() => {
+		const groups = directory.departments.map((department) => ({
+			department,
+			contacts: [] as typeof filteredContacts
+		}));
+		const groupByDepartmentId = new Map(groups.map((group) => [group.department.id, group]));
 
-	function escapeRegExp(value: string) {
-		return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	}
+		for (const contact of filteredContacts) {
+			// In a regular directory view, show each person only once. During a global
+			// search, every assignment provides useful context, so repeat the person
+			// under each department they belong to.
+			const memberships = departmentId
+				? contact.departments.filter((item) => item.id === departmentId)
+				: query.trim()
+					? contact.departments
+					: contact.departments.slice(0, 1);
 
-	async function search() {
+			for (const membership of memberships) {
+				groupByDepartmentId.get(membership.id)?.contacts.push(contact);
+			}
+		}
+
+		for (const group of groups) {
+			group.contacts.sort((first, second) => {
+				const firstOrder =
+					first.departments.find((item) => item.id === group.department.id)?.sortOrder ?? 0;
+				const secondOrder =
+					second.departments.find((item) => item.id === group.department.id)?.sortOrder ?? 0;
+				return firstOrder - secondOrder;
+			});
+		}
+		return groups
+			.filter((group) => group.contacts.length > 0)
+			.map((group) => {
+				const roleGroups = new Map<string, { role: string; contacts: typeof filteredContacts }>();
+				for (const contact of group.contacts) {
+					const membership = contact.departments.find((item) => item.id === group.department.id);
+					const role = membership?.role ?? '';
+					const roleGroup = roleGroups.get(role) ?? { role, contacts: [] };
+					roleGroup.contacts.push(contact);
+					roleGroups.set(role, roleGroup);
+				}
+				return { department: group.department, roleGroups: [...roleGroups.values()] };
+			});
+	});
+	let displayedAssignmentCount = $derived(
+		contactGroups.reduce(
+			(total, group) =>
+				total +
+				group.roleGroups.reduce((roleTotal, roleGroup) => roleTotal + roleGroup.contacts.length, 0),
+			0
+		)
+	);
+
+	function updateUrl() {
 		const parameters = new URLSearchParams();
 		if (query.trim()) parameters.set('q', query.trim());
 		if (departmentId) parameters.set('department', departmentId);
 		const search = parameters.toString();
-		const url = `/api/directory${search ? `?${search}` : ''}`;
-		const currentRequest = ++requestId;
-		isSearching = true;
+		window.history.replaceState(window.history.state, '', search ? `/?${search}` : '/');
+	}
 
+	onMount(() => {
+		const updateOffset = () => {
+			stickyGroupOffset = topbarElement?.offsetHeight ?? 0;
+		};
+		const observer = new ResizeObserver(updateOffset);
+		if (topbarElement) observer.observe(topbarElement);
+		updateOffset();
+		return () => observer.disconnect();
+	});
+
+	async function copyPhone(contactId: string, phone: string) {
 		try {
-			const response = await fetch(url);
-			if (!response.ok) return;
-			const result = (await response.json()) as Directory;
-			if (currentRequest !== requestId) return;
-			directory = result;
-			window.history.replaceState(window.history.state, '', search ? `/?${search}` : '/');
+			await navigator.clipboard.writeText(phone);
+			copiedContactId = contactId;
+			window.setTimeout(() => {
+				if (copiedContactId === contactId) copiedContactId = null;
+			}, 1600);
 		} catch {
-			// Keep the most recent successful result visible if the connection fails.
-		} finally {
-			if (currentRequest === requestId) isSearching = false;
+			// The call button remains available if clipboard permission is unavailable.
 		}
 	}
 </script>
@@ -73,6 +145,7 @@
 
 <main class="mx-auto min-h-screen max-w-3xl px-4 pb-7 sm:px-6 sm:pb-10">
 	<div
+		bind:this={topbarElement}
 		class="sticky top-0 z-20 -mx-4 border-b border-[var(--color-border)] bg-[color:color-mix(in_srgb,var(--color-bg)_94%,transparent)] px-4 pt-4 backdrop-blur sm:-mx-6 sm:px-6 sm:pt-6"
 	>
 		<header class="flex items-start justify-between gap-4 pb-4">
@@ -180,13 +253,13 @@
 		</header>
 
 		{#if data.configured && directory.event}
-			<div class="space-y-3 pb-4">
+			<div class="space-y-2 pb-3">
 				<label class="block">
 					<span class="sr-only">Tìm danh bạ</span>
 					<input
-						class="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-4 text-base shadow-sm ring-[var(--color-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:ring-2"
+						class="w-full rounded-xl border border-[var(--color-border)] bg-white px-3 py-2.5 text-sm shadow-sm ring-[var(--color-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:ring-2"
 						name="q"
-						oninput={scheduleSearch}
+						oninput={updateUrl}
 						placeholder="Nhập tên hoặc số điện thoại"
 						bind:value={query}
 					/>
@@ -194,13 +267,13 @@
 				<label class="block">
 					<span class="sr-only">Lọc theo tiểu ban</span>
 					<select
-						class="w-full rounded-xl border border-[var(--color-border)] bg-white px-4 py-3 ring-[var(--color-primary)] outline-none focus:ring-2"
+						class="w-full rounded-xl border border-[var(--color-border)] bg-white px-3 py-2.5 text-sm ring-[var(--color-primary)] outline-none focus:ring-2"
 						name="department"
-						onchange={search}
+						onchange={updateUrl}
 						bind:value={departmentId}
 					>
 						<option value="">Tất cả tiểu ban</option>
-						{#each data.departments as department}
+						{#each directory.departments as department}
 							<option value={department.id}>{department.name}</option>
 						{/each}
 					</select>
@@ -234,10 +307,14 @@
 		</section>
 	{:else}
 		<p aria-live="polite" class="mb-4 text-sm text-[var(--color-text-muted)]">
-			{#if isSearching}Đang tìm…{:else}{directory.contacts.length} người phù hợp{/if}
+			{#if query.trim() && !departmentId}
+				{displayedAssignmentCount} phân công · {filteredContacts.length} người phù hợp
+			{:else}
+				{filteredContacts.length} người phù hợp
+			{/if}
 		</p>
 
-		{#if directory.contacts.length === 0}
+		{#if filteredContacts.length === 0}
 			<section class="rounded-2xl border border-[var(--color-border)] bg-white p-5 text-center">
 				<p class="font-semibold">Không tìm thấy liên hệ phù hợp</p>
 				<p class="mt-1 text-sm text-[var(--color-text-muted)]">
@@ -245,104 +322,160 @@
 				</p>
 			</section>
 		{:else}
-			<div class="space-y-3">
-				{#each directory.contacts as contact}
-					<article class="rounded-2xl border border-[var(--color-border)] bg-white p-5 shadow-sm">
-						<div class="flex items-start justify-between gap-4">
-							<div>
-								<h2 class="text-lg font-bold">
-									{#each highlightedParts(contact.displayName) as part}{#if part.highlighted}<mark
+			<div class="rounded-xl border border-[var(--color-border)] bg-white">
+				{#each contactGroups as group}
+					<section>
+						<h2
+							class="sticky z-10 border-y border-[color:color-mix(in_srgb,var(--color-primary)_22%,var(--color-border))] bg-[var(--color-primary-soft)] px-3 py-2 text-xs font-bold tracking-wide text-[var(--color-primary-dark)] uppercase shadow-[0_1px_2px_rgb(24_32_28_/_0.06)] sm:px-4"
+							style:top={`${stickyGroupOffset}px`}
+						>
+							{#each highlightNormalizedText(group.department.name, query) as part}{#if part.highlighted}<mark
+										class="rounded bg-amber-200 px-0.5 text-inherit">{part.value}</mark
+									>{:else}{part.value}{/if}{/each}
+						</h2>
+						{#each group.roleGroups as roleGroup}
+							{#if roleGroup.role}
+								<h3
+									class="sticky z-[9] border-b border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-text-secondary)] shadow-[0_1px_2px_rgb(24_32_28_/_0.04)] sm:px-4"
+									style:top={`${stickyGroupOffset + 33}px`}
+								>
+									{#each highlightNormalizedText(roleGroup.role, query) as part}{#if part.highlighted}<mark
 												class="rounded bg-amber-200 px-0.5 text-inherit">{part.value}</mark
 											>{:else}{part.value}{/if}{/each}
-								</h2>
-								{#if contact.phoneDisplay}
-									<a
-										class="mt-1 inline-block font-medium text-[var(--color-primary)]"
-										href={`tel:${contact.phoneDigits}`}>{contact.phoneDisplay}</a
-									>
-								{:else}
-									<p class="mt-1 text-sm text-[var(--color-text-muted)]">Chưa có số điện thoại</p>
-								{/if}
-							</div>
-							<div class="flex shrink-0 gap-2">
-								{#if contact.phoneDisplay}
-									<a
-										aria-label={`Gọi ${contact.displayName}`}
-										class="grid size-11 place-items-center rounded-xl bg-[var(--color-primary)] text-white"
-										href={`tel:${contact.phoneDigits}`}
-										title={`Gọi ${contact.displayName}`}
-										><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
-											><path
-												d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.64a2 2 0 0 1-.45 2.11L8.01 9.74a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.86.29 1.74.5 2.64.62A2 2 0 0 1 22 16.92Z"
-												stroke="currentColor"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="1.8"
-											/></svg
-										></a
-									>
-								{/if}
-								{#if data.isAdmin}
-									<button
-										aria-label={`Sửa ${contact.displayName}`}
-										class="grid size-10 place-items-center rounded-lg border border-[var(--color-border)] bg-white text-[var(--color-primary)]"
-										onclick={() => (editContactId = contact.id)}
-										title={`Sửa ${contact.displayName}`}
-										type="button"
-										><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
-											><path
-												d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3ZM14.5 7.5l3 3"
-												stroke="currentColor"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="1.8"
-											/></svg
-										></button
-									>
-								{:else}
-									<a
-										aria-label={`Đăng nhập để sửa ${contact.displayName}`}
-										class="grid size-10 place-items-center rounded-lg border border-[var(--color-border)] bg-white text-[var(--color-primary)]"
-										href={`/login?next=${encodeURIComponent(`/?edit=${contact.id}`)}`}
-										title="Đăng nhập để sửa"
-										><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
-											><path
-												d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3ZM14.5 7.5l3 3"
-												stroke="currentColor"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="1.8"
-											/></svg
-										></a
-									>
-								{/if}
-							</div>
-						</div>
-						<ul class="mt-4 space-y-1.5">
-							{#each contact.departments as department}
-								<li
-									class="flex items-center gap-2 rounded-lg bg-[var(--color-surface)] px-3 py-2 text-sm"
+								</h3>
+							{/if}
+							{#each roleGroup.contacts as contact}
+								<article
+									class="border-b border-[var(--color-border)] px-3 py-2.5 last:border-b-0 sm:px-4"
 								>
-									<span
-										class="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-primary)] text-white shadow-sm"
-										><svg aria-hidden="true" class="size-4" fill="none" viewBox="0 0 24 24"
-											><path
-												d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 17l9 5 9-5"
-												stroke="currentColor"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="1.8"
-											/></svg
-										></span
-									><span
-										><span class="font-semibold">{department.name}</span>{department.role
-											? ` · ${department.role}`
-											: ''}{department.isSupport ? ' · Hỗ trợ' : ''}</span
-									>
-								</li>
+									<div class="flex min-h-10 items-center gap-2">
+										<div class="min-w-0 flex-1">
+											<div class="flex min-w-0 items-center gap-0.5">
+												<h2 class="truncate text-sm leading-5 font-semibold">
+													{#each highlightNormalizedText(contact.displayName, query) as part}{#if part.highlighted}<mark
+																class="rounded bg-amber-200 px-0.5 text-inherit">{part.value}</mark
+															>{:else}{part.value}{/if}{/each}
+												</h2>
+												{#if data.isAdmin}
+													<button
+														aria-label={`Sửa ${contact.displayName}`}
+														class="grid size-7 shrink-0 place-items-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-primary)]"
+														onclick={() => (editContactId = contact.id)}
+														title={`Sửa ${contact.displayName}`}
+														type="button"
+														><svg
+															aria-hidden="true"
+															class="size-3.5"
+															fill="none"
+															viewBox="0 0 24 24"
+															><path
+																d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3ZM14.5 7.5l3 3"
+																stroke="currentColor"
+																stroke-linecap="round"
+																stroke-linejoin="round"
+																stroke-width="1.8"
+															/></svg
+														></button
+													>
+												{:else}
+													<a
+														aria-label={`Đăng nhập để sửa ${contact.displayName}`}
+														class="grid size-7 shrink-0 place-items-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-primary)]"
+														href={`/login?next=${encodeURIComponent(`/?edit=${contact.id}`)}`}
+														title="Đăng nhập để sửa"
+														><svg
+															aria-hidden="true"
+															class="size-3.5"
+															fill="none"
+															viewBox="0 0 24 24"
+															><path
+																d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3ZM14.5 7.5l3 3"
+																stroke="currentColor"
+																stroke-linecap="round"
+																stroke-linejoin="round"
+																stroke-width="1.8"
+															/></svg
+														></a
+													>
+												{/if}
+											</div>
+											{#if contact.phoneDisplay}
+												<div class="flex items-center gap-0.5">
+													<a
+														class="truncate text-xs leading-4 font-medium text-[var(--color-primary)]"
+														href={`tel:${contact.phoneDigits}`}
+														>{#each highlightPhoneText(contact.phoneDisplay, query) as part}{#if part.highlighted}<mark
+																	class="rounded bg-amber-200 px-0.5 text-inherit"
+																	>{part.value}</mark
+																>{:else}{part.value}{/if}{/each}</a
+													><button
+														aria-label={`Sao chép số ${contact.phoneDisplay}`}
+														class="grid size-7 shrink-0 place-items-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-primary)]"
+														onclick={() => copyPhone(contact.id, contact.phoneDisplay!)}
+														title={copiedContactId === contact.id ? 'Đã sao chép' : 'Sao chép số'}
+														type="button"
+														>{#if copiedContactId === contact.id}<svg
+																aria-hidden="true"
+																class="size-3.5"
+																fill="none"
+																viewBox="0 0 24 24"
+																><path
+																	d="m5 12 4 4L19 6"
+																	stroke="currentColor"
+																	stroke-linecap="round"
+																	stroke-linejoin="round"
+																	stroke-width="2"
+																/></svg
+															>{:else}<svg
+																aria-hidden="true"
+																class="size-3.5"
+																fill="none"
+																viewBox="0 0 24 24"
+																><rect
+																	height="13"
+																	rx="2"
+																	stroke="currentColor"
+																	stroke-width="1.8"
+																	width="10"
+																	x="9"
+																	y="8"
+																/><path
+																	d="M15 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"
+																	stroke="currentColor"
+																	stroke-linecap="round"
+																	stroke-width="1.8"
+																/></svg
+															>{/if}</button
+													>
+												</div>
+											{:else}
+												<p class="text-xs leading-4 text-[var(--color-text-muted)]">
+													Chưa có số điện thoại
+												</p>
+											{/if}
+										</div>
+										{#if contact.phoneDisplay}
+											<a
+												aria-label={`Gọi ${contact.displayName}`}
+												class="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
+												href={`tel:${contact.phoneDigits}`}
+												title={`Gọi ${contact.displayName}`}
+												><svg aria-hidden="true" class="size-4" fill="none" viewBox="0 0 24 24"
+													><path
+														d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.64a2 2 0 0 1-.45 2.11L8.01 9.74a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.86.29 1.74.5 2.64.62A2 2 0 0 1 22 16.92Z"
+														stroke="currentColor"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="1.8"
+													/></svg
+												></a
+											>
+										{/if}
+									</div>
+								</article>
 							{/each}
-						</ul>
-					</article>
+						{/each}
+					</section>
 				{/each}
 			</div>
 		{/if}

@@ -9,7 +9,7 @@ export type DirectoryContact = {
 	displayName: string;
 	phoneDisplay: string | null;
 	phoneDigits: string | null;
-	departments: { id: string; name: string; role: string; isSupport: boolean }[];
+	departments: { id: string; name: string; role: string; isSupport: boolean; sortOrder: number }[];
 };
 
 export async function getActiveDirectory(input: { query: string; departmentId: string | null }) {
@@ -54,13 +54,14 @@ export async function getActiveDirectory(input: { query: string; departmentId: s
 			departmentId: departments.id,
 			departmentName: departments.name,
 			role: memberships.role,
-			isSupport: memberships.isSupport
+			isSupport: memberships.isSupport,
+			membershipSortOrder: memberships.sortOrder
 		})
 		.from(contacts)
 		.innerJoin(memberships, eq(memberships.contactId, contacts.id))
 		.innerJoin(departments, eq(departments.id, memberships.departmentId))
 		.where(and(...predicates))
-		.orderBy(asc(contacts.displayName), asc(departments.sortOrder));
+		.orderBy(asc(departments.sortOrder), asc(memberships.sortOrder), asc(contacts.displayName));
 
 	const contactsById = new Map<string, DirectoryContact>();
 	for (const row of rows) {
@@ -75,7 +76,8 @@ export async function getActiveDirectory(input: { query: string; departmentId: s
 			id: row.departmentId,
 			name: row.departmentName,
 			role: row.role,
-			isSupport: row.isSupport
+			isSupport: row.isSupport,
+			sortOrder: row.membershipSortOrder
 		});
 		contactsById.set(row.id, contact);
 	}

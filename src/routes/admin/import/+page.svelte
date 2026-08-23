@@ -78,17 +78,38 @@
 
 		<div class="flex flex-wrap gap-3">
 			<button
-				class="rounded-xl bg-white px-4 py-3 font-semibold text-[var(--color-primary)] ring-1 ring-[var(--color-primary)]"
+				aria-label="Xem trước dữ liệu"
+				class="grid size-11 place-items-center rounded-xl bg-white font-semibold text-[var(--color-primary)] ring-1 ring-[var(--color-primary)] sm:flex sm:w-auto sm:gap-2 sm:px-4"
 				formaction="?/preview"
 				formmethod="POST"
-				type="submit">Xem trước</button
+				title="Xem trước dữ liệu"
+				type="submit"
+				><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
+					><path
+						d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Zm10 2.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"
+						stroke="currentColor"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="1.8"
+					/></svg
+				><span class="hidden sm:inline">Xem trước</span></button
 			>
 			<button
-				class="rounded-xl bg-[var(--color-primary)] px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+				aria-label="Tạo kỳ lễ nháp"
+				class="grid size-11 place-items-center rounded-xl bg-[var(--color-primary)] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 sm:flex sm:w-auto sm:gap-2 sm:px-4"
 				disabled={!form?.preview || form.preview.errorCount > 0}
 				formaction="?/import"
 				formmethod="POST"
-				type="submit">Tạo kỳ lễ nháp</button
+				title="Tạo kỳ lễ nháp"
+				type="submit"
+				><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
+					><path
+						d="M12 5v14M5 12h14"
+						stroke="currentColor"
+						stroke-linecap="round"
+						stroke-width="1.8"
+					/></svg
+				><span class="hidden sm:inline">Tạo kỳ lễ nháp</span></button
 			>
 		</div>
 	</form>
@@ -159,10 +180,21 @@
 			<form class="mt-4" method="POST">
 				<input name="eventId" type="hidden" value={form.createdEvent.id} />
 				<button
-					class="rounded-xl bg-emerald-700 px-4 py-3 font-semibold text-white"
+					aria-label="Kích hoạt kỳ lễ này"
+					class="grid size-11 place-items-center rounded-xl bg-emerald-700 font-semibold text-white sm:flex sm:w-auto sm:gap-2 sm:px-4"
 					formaction="?/activate"
 					formmethod="POST"
-					type="submit">Kích hoạt kỳ lễ này</button
+					title="Kích hoạt kỳ lễ này"
+					type="submit"
+					><svg aria-hidden="true" class="size-5" fill="none" viewBox="0 0 24 24"
+						><path
+							d="m5 12 4 4L19 6"
+							stroke="currentColor"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="1.8"
+						/></svg
+					><span class="hidden sm:inline">Kích hoạt kỳ lễ này</span></button
 				>
 			</form>
 		</section>

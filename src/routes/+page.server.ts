@@ -40,7 +40,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			editId,
 			query,
 			departmentId,
-			...(await getActiveDirectory({ query, departmentId }))
+			// The public directory is small enough to search locally after the first SSR response.
+			// Do not make each keystroke wait for a round trip to Neon.
+			...(await getActiveDirectory({ query: '', departmentId: null }))
 		};
 	} catch (error) {
 		console.error('[directory] database connection failed', error);

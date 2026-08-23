@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { fail } from '@sveltejs/kit';
 
 import { normalizePhone, normalizeText } from '$lib/contacts/normalize';
@@ -31,7 +31,12 @@ export const load: PageServerLoad = async ({ locals }) => {
 			.where(eq(contacts.eventId, event.id))
 			.orderBy(asc(contacts.displayName)),
 		db
-			.select({ id: departments.id, name: departments.name, notes: departments.notes })
+			.select({
+				id: departments.id,
+				name: departments.name,
+				notes: departments.notes,
+				sortOrder: departments.sortOrder
+			})
 			.from(departments)
 			.where(eq(departments.eventId, event.id))
 			.orderBy(asc(departments.sortOrder), asc(departments.name)),
@@ -42,11 +47,13 @@ export const load: PageServerLoad = async ({ locals }) => {
 				departmentId: memberships.departmentId,
 				departmentName: departments.name,
 				role: memberships.role,
-				isSupport: memberships.isSupport
+				isSupport: memberships.isSupport,
+				sortOrder: memberships.sortOrder
 			})
 			.from(memberships)
 			.innerJoin(departments, eq(departments.id, memberships.departmentId))
 			.where(eq(departments.eventId, event.id))
+			.orderBy(asc(departments.sortOrder), asc(memberships.sortOrder))
 	]);
 
 	const membershipsByContact = new Map<string, typeof assignmentRows>();
@@ -55,6 +62,15 @@ export const load: PageServerLoad = async ({ locals }) => {
 		list.push(assignment);
 		membershipsByContact.set(assignment.contactId, list);
 	}
+	const contactOrder = new Map<string, number>();
+	for (const [index, assignment] of assignmentRows.entries()) {
+		if (!contactOrder.has(assignment.contactId)) contactOrder.set(assignment.contactId, index);
+	}
+	eventContacts.sort(
+		(first, second) =>
+			(contactOrder.get(first.id) ?? Number.MAX_SAFE_INTEGER) -
+			(contactOrder.get(second.id) ?? Number.MAX_SAFE_INTEGER)
+	);
 
 	return {
 		user,
@@ -191,6 +207,52 @@ export const actions = {
 		await getDb().delete(contacts).where(eq(contacts.id, id));
 		return { success: 'Đã xóa liên hệ và các phân công liên quan.' };
 	},
+	bulkDeleteContacts: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const ids = selectedIds(await request.formData());
+		const eventId = await getActiveEventId();
+		if (!eventId || ids.length === 0) return fail(400, { error: 'Chọn ít nhất một liên hệ.' });
+		await getDb()
+			.delete(contacts)
+			.where(and(eq(contacts.eventId, eventId), inArray(contacts.id, ids)));
+		return { success: `Đã xóa ${ids.length} liên hệ.` };
+	},
+	bulkMoveContacts: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const form = await request.formData();
+		const ids = selectedIds(form);
+		const departmentIds = selectedIds(form, 'departmentIds');
+		const eventId = await getActiveEventId();
+		if (!eventId || departmentIds.length === 0 || ids.length === 0)
+			return fail(400, { error: 'Chọn liên hệ và tiểu ban đích.' });
+		const db = getDb();
+		const targets = await db
+			.select({ id: departments.id })
+			.from(departments)
+			.where(and(inArray(departments.id, departmentIds), eq(departments.eventId, eventId)));
+		if (targets.length !== departmentIds.length)
+			return fail(400, { error: 'Tiểu ban đích không hợp lệ.' });
+		const validContacts = await db
+			.select({ id: contacts.id })
+			.from(contacts)
+			.where(and(eq(contacts.eventId, eventId), inArray(contacts.id, ids)));
+		const contactIds = validContacts.map((contact) => contact.id);
+		const sortOrders = await Promise.all(departmentIds.map(getNextMembershipSortOrder));
+		await db.batch([
+			db.delete(memberships).where(inArray(memberships.contactId, contactIds)),
+			...departmentIds.flatMap((departmentId, departmentIndex) =>
+				contactIds.map((contactId, contactIndex) =>
+					db.insert(memberships).values({
+						id: crypto.randomUUID(),
+						contactId,
+						departmentId,
+						sortOrder: sortOrders[departmentIndex] + contactIndex
+					})
+				)
+			)
+		]);
+		return { success: `Đã chuyển ${contactIds.length} liên hệ sang tiểu ban mới.` };
+	},
 	createDepartment: async ({ locals, request }) => {
 		requireAdmin(locals, '/admin');
 		const form = await request.formData();
@@ -200,11 +262,72 @@ export const actions = {
 		try {
 			await getDb()
 				.insert(departments)
-				.values({ eventId, name, normalizedName: normalizeText(name) });
+				.values({
+					eventId,
+					name,
+					normalizedName: normalizeText(name),
+					sortOrder: await getNextDepartmentSortOrder(eventId)
+				});
 			return { success: 'Đã thêm tiểu ban.' };
 		} catch {
 			return fail(400, { error: 'Tiểu ban này đã tồn tại.' });
 		}
+	},
+	moveDepartment: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const form = await request.formData();
+		const id = value(form, 'id');
+		const direction = value(form, 'direction');
+		if (!id || (direction !== 'up' && direction !== 'down'))
+			return fail(400, { error: 'Thao tác sắp xếp không hợp lệ.' });
+		const eventId = await getActiveEventId();
+		if (!eventId) return fail(404, { error: 'Không có đại lễ đang hoạt động.' });
+		const db = getDb();
+		const ordered = await db
+			.select({ id: departments.id, sortOrder: departments.sortOrder })
+			.from(departments)
+			.where(eq(departments.eventId, eventId))
+			.orderBy(asc(departments.sortOrder), asc(departments.name));
+		const index = ordered.findIndex((department) => department.id === id);
+		const current = ordered[index];
+		const target = ordered[index + (direction === 'up' ? -1 : 1)];
+		if (!current || !target) return { success: 'Thứ tự tiểu ban không thay đổi.' };
+		await db.batch([
+			db
+				.update(departments)
+				.set({ sortOrder: target.sortOrder, updatedAt: new Date() })
+				.where(eq(departments.id, current.id)),
+			db
+				.update(departments)
+				.set({ sortOrder: current.sortOrder, updatedAt: new Date() })
+				.where(eq(departments.id, target.id))
+		]);
+		return { success: 'Đã cập nhật thứ tự tiểu ban.' };
+	},
+	reorderDepartments: async ({ locals, request }) => {
+		requireAdmin(locals, '/admin');
+		const ids = selectedIds(await request.formData(), 'order');
+		const eventId = await getActiveEventId();
+		if (!eventId || ids.length === 0) return fail(400, { error: 'Thứ tự tiểu ban không hợp lệ.' });
+		const existing = await getDb()
+			.select({ id: departments.id })
+			.from(departments)
+			.where(eq(departments.eventId, eventId));
+		if (
+			ids.length !== existing.length ||
+			ids.some((id) => !existing.some((department) => department.id === id))
+		)
+			return fail(400, { error: 'Thứ tự tiểu ban không hợp lệ.' });
+		const updates = ids.map((id, sortOrder) =>
+			getDb()
+				.update(departments)
+				.set({ sortOrder, updatedAt: new Date() })
+				.where(eq(departments.id, id))
+		);
+		const [firstUpdate, ...remainingUpdates] = updates;
+		if (!firstUpdate) return fail(400, { error: 'Thứ tự tiểu ban không hợp lệ.' });
+		await getDb().batch([firstUpdate, ...remainingUpdates]);
+		return { success: 'Đã cập nhật thứ tự tiểu ban.' };
 	},
 	updateDepartment: async ({ locals, request }) => {
 		requireAdmin(locals, '/admin');
@@ -243,7 +366,13 @@ export const actions = {
 		try {
 			await getDb()
 				.insert(memberships)
-				.values({ contactId, departmentId, role, isSupport: form.get('isSupport') === 'on' });
+				.values({
+					contactId,
+					departmentId,
+					role,
+					isSupport: form.get('isSupport') === 'on',
+					sortOrder: await getNextMembershipSortOrder(departmentId)
+				});
 			return { success: 'Đã thêm phân công.' };
 		} catch {
 			return fail(400, { error: 'Phân công này đã tồn tại.' });
@@ -262,6 +391,15 @@ function value(form: FormData, key: string) {
 	return String(form.get(key) ?? '').trim();
 }
 
+function selectedIds(form: FormData, key = 'ids') {
+	try {
+		const ids = JSON.parse(value(form, key));
+		return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+	} catch {
+		return [];
+	}
+}
+
 async function getActiveEventId() {
 	const [event] = await getDb()
 		.select({ id: events.id })
@@ -269,6 +407,26 @@ async function getActiveEventId() {
 		.where(eq(events.status, 'active'))
 		.limit(1);
 	return event?.id ?? null;
+}
+
+async function getNextDepartmentSortOrder(eventId: string) {
+	const [lastDepartment] = await getDb()
+		.select({ sortOrder: departments.sortOrder })
+		.from(departments)
+		.where(eq(departments.eventId, eventId))
+		.orderBy(desc(departments.sortOrder))
+		.limit(1);
+	return (lastDepartment?.sortOrder ?? -1) + 1;
+}
+
+async function getNextMembershipSortOrder(departmentId: string) {
+	const [lastMembership] = await getDb()
+		.select({ sortOrder: memberships.sortOrder })
+		.from(memberships)
+		.where(eq(memberships.departmentId, departmentId))
+		.orderBy(desc(memberships.sortOrder))
+		.limit(1);
+	return (lastMembership?.sortOrder ?? -1) + 1;
 }
 
 function contactInput(form: FormData) {

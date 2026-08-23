@@ -11,6 +11,13 @@
 	let selectedContactId = $state<string | null>(null);
 	let isAddingContact = $state(false);
 	let newContacts = $state([{ displayName: '', phone: '' }]);
+	let bulkContactIds = $state<string[]>([]);
+	let bulkDepartmentIds = $state<string[]>([]);
+	let departmentPopover = $state<HTMLDetailsElement | null>(null);
+	// svelte-ignore state_referenced_locally
+	let departmentOrder = $state([...data.departments]);
+	let draggedDepartmentId = $state<string | null>(null);
+	let dragOverDepartmentId = $state<string | null>(null);
 	let selectedContact = $derived(
 		data.contacts.find((contact) => contact.id === selectedContactId) ?? null
 	);
@@ -43,6 +50,41 @@
 	}
 	function removeContactRow(index: number) {
 		if (newContacts.length > 1) newContacts.splice(index, 1);
+	}
+	function toggleBulkContact(id: string, checked: boolean) {
+		bulkContactIds = checked
+			? [...new Set([...bulkContactIds, id])]
+			: bulkContactIds.filter((contactId) => contactId !== id);
+	}
+	function toggleBulkDepartment(id: string, checked: boolean) {
+		bulkDepartmentIds = checked
+			? [...new Set([...bulkDepartmentIds, id])]
+			: bulkDepartmentIds.filter((departmentId) => departmentId !== id);
+	}
+	function toggleAllVisibleContacts(checked: boolean) {
+		const visibleIds = filteredContacts.map((contact) => contact.id);
+		bulkContactIds = checked
+			? [...new Set([...bulkContactIds, ...visibleIds])]
+			: bulkContactIds.filter((id) => !visibleIds.includes(id));
+	}
+	async function moveDepartmentByDrag(targetId: string) {
+		if (!draggedDepartmentId || draggedDepartmentId === targetId) return;
+		const from = departmentOrder.findIndex((department) => department.id === draggedDepartmentId);
+		const to = departmentOrder.findIndex((department) => department.id === targetId);
+		if (from < 0 || to < 0) return;
+		const next = [...departmentOrder];
+		const [moved] = next.splice(from, 1);
+		next.splice(to, 0, moved);
+		departmentOrder = next;
+		await fetch('?/reorderDepartments', {
+			method: 'POST',
+			body: new URLSearchParams({ order: JSON.stringify(next.map((department) => department.id)) })
+		});
+	}
+	function closeDepartmentPopoverWhenFocusLeaves(event: FocusEvent) {
+		const nextTarget = event.relatedTarget;
+		if (nextTarget instanceof Node && departmentPopover?.contains(nextTarget)) return;
+		departmentPopover?.removeAttribute('open');
 	}
 </script>
 
@@ -176,14 +218,21 @@
 				class:showing-detail={isAddingContact || selectedContact !== null}
 				class="contacts-workspace grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.85fr)]"
 			>
-				<div class="contact-list panel overflow-hidden">
+				<div class="contact-list panel">
 					<div class="border-b border-[var(--color-border)] p-4">
 						<div class="flex items-center justify-between gap-3">
 							<div>
 								<h2 class="font-bold">Liên hệ</h2>
 								<p class="text-sm text-[var(--color-text-muted)]">Tìm và chọn để chỉnh sửa</p>
 							</div>
-							<button class="button-primary" onclick={openNewContact}>+ Thêm</button>
+							<button
+								aria-label="Thêm liên hệ"
+								class="button-primary action-icon"
+								onclick={openNewContact}
+								title="Thêm liên hệ"
+								><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg
+								><span class="action-label">Thêm</span></button
+							>
 						</div>
 						<input
 							class="field mt-4"
@@ -191,25 +240,115 @@
 							placeholder="Tìm theo tên hoặc số điện thoại"
 							type="search"
 						/>
+						{#if filteredContacts.length > 0}
+							<label
+								class="mt-3 flex items-center gap-2 text-xs font-semibold text-[var(--color-primary-dark)]"
+								><input
+									aria-label="Chọn tất cả liên hệ đang hiển thị"
+									class="app-checkbox"
+									checked={filteredContacts.every((contact) => bulkContactIds.includes(contact.id))}
+									onchange={(event) => toggleAllVisibleContacts(event.currentTarget.checked)}
+									type="checkbox"
+								/>Chọn tất cả kết quả</label
+							>
+						{/if}
+						{#if bulkContactIds.length > 0}
+							<form
+								class="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 mx-auto flex max-w-lg flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-primary-soft)] p-2 shadow-xl lg:bottom-6"
+								method="POST"
+							>
+								<input name="ids" type="hidden" value={JSON.stringify(bulkContactIds)} />
+								<span class="text-xs font-semibold text-[var(--color-primary-dark)]"
+									>{bulkContactIds.length} đã chọn</span
+								>
+								<input
+									name="departmentIds"
+									type="hidden"
+									value={JSON.stringify(bulkDepartmentIds)}
+								/>
+								<details
+									bind:this={departmentPopover}
+									class="relative min-w-0 flex-1"
+									onfocusout={closeDepartmentPopoverWhenFocusLeaves}
+								>
+									<summary
+										class="cursor-pointer rounded-lg border border-[var(--color-border)] bg-white px-2 py-2 text-xs font-medium text-[var(--color-text-secondary)]"
+										>{bulkDepartmentIds.length
+											? `${bulkDepartmentIds.length} tiểu ban đích`
+											: 'Chọn tiểu ban đích'}</summary
+									>
+									<div
+										class="absolute bottom-[calc(100%+0.5rem)] left-0 z-30 max-h-52 w-64 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-white p-1 shadow-xl"
+									>
+										{#each data.departments as department}<label
+												class="flex items-center gap-2 rounded-md px-2 py-2 text-xs hover:bg-[var(--color-surface)]"
+												><input
+													class="app-checkbox"
+													checked={bulkDepartmentIds.includes(department.id)}
+													onchange={(event) =>
+														toggleBulkDepartment(department.id, event.currentTarget.checked)}
+													type="checkbox"
+												/><span>{department.name}</span></label
+											>{/each}
+									</div>
+								</details>
+								<button
+									aria-label="Chuyển tiểu ban"
+									class="button-primary action-icon"
+									disabled={bulkDepartmentIds.length === 0}
+									formaction="?/bulkMoveContacts"
+									title="Chuyển tiểu ban"
+									type="submit"
+									><svg aria-hidden="true" viewBox="0 0 24 24"
+										><path d="m14 7 5 5-5 5M19 12H5" /></svg
+									><span class="action-label">Chuyển</span></button
+								>
+								<button
+									aria-label="Xóa các liên hệ đã chọn"
+									class="button-danger action-icon"
+									formaction="?/bulkDeleteContacts"
+									onclick={(event) => {
+										if (!confirm(`Xóa ${bulkContactIds.length} liên hệ đã chọn?`))
+											event.preventDefault();
+									}}
+									title="Xóa đã chọn"
+									type="submit"
+									><svg aria-hidden="true" viewBox="0 0 24 24"
+										><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14" /></svg
+									><span class="action-label">Xóa</span></button
+								>
+							</form>
+						{/if}
 					</div>
 					<div class="max-h-[65vh] overflow-y-auto p-2">
 						{#if filteredContacts.length === 0}<p
 								class="p-4 text-center text-sm text-[var(--color-text-muted)]"
 							>
 								Không có liên hệ phù hợp.
-							</p>{:else}{#each filteredContacts as contact}<button
-									class:selected={contact.id === selectedContactId}
-									class="contact-row"
-									onclick={() => openContact(contact.id)}
-									><span class="min-w-0 text-left"
-										><strong class="block truncate">{contact.displayName}</strong><span
-											class="block truncate text-sm text-[var(--color-text-muted)]"
-											>{contact.phoneDisplay ?? 'Chưa có số điện thoại'}</span
-										></span
-									><span class="shrink-0 text-xs text-[var(--color-text-muted)]"
-										>{contact.memberships.length} ban</span
-									></button
-								>{/each}{/if}
+							</p>{:else}{#each filteredContacts as contact}<div class="flex items-center gap-1">
+									<label class="grid size-9 shrink-0 place-items-center"
+										><input
+											aria-label={`Chọn ${contact.displayName}`}
+											class="app-checkbox"
+											checked={bulkContactIds.includes(contact.id)}
+											onchange={(event) =>
+												toggleBulkContact(contact.id, event.currentTarget.checked)}
+											type="checkbox"
+										/></label
+									><button
+										class:selected={contact.id === selectedContactId}
+										class="contact-row"
+										onclick={() => openContact(contact.id)}
+										><span class="min-w-0 text-left"
+											><strong class="block truncate">{contact.displayName}</strong><span
+												class="block truncate text-sm text-[var(--color-text-muted)]"
+												>{contact.phoneDisplay ?? 'Chưa có số điện thoại'}</span
+											></span
+										><span class="shrink-0 text-xs text-[var(--color-text-muted)]"
+											>{contact.memberships.length} ban</span
+										></button
+									>
+								</div>{/each}{/if}
 					</div>
 				</div>
 				<div class="contact-editor panel p-5">
@@ -248,16 +387,34 @@
 									</div>
 								</div>
 							{/each}
-							<button class="button-secondary w-full" onclick={addContactRow} type="button"
-								>+ Thêm dòng</button
+							<button
+								aria-label="Thêm dòng liên hệ"
+								class="button-secondary action-icon w-full"
+								onclick={addContactRow}
+								title="Thêm dòng"
+								type="button"
+								><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg
+								><span class="action-label">Thêm dòng</span></button
+							>
 							>
 							<div class="flex gap-2">
-								<button class="button-primary" formaction="?/createContacts" type="submit"
-									>Lưu {newContacts.length} liên hệ</button
+								<button
+									aria-label={`Lưu ${newContacts.length} liên hệ`}
+									class="button-primary action-icon"
+									formaction="?/createContacts"
+									title={`Lưu ${newContacts.length} liên hệ`}
+									type="submit"
+									><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg
+									><span class="action-label">Lưu {newContacts.length} liên hệ</span></button
 								><button
-									class="button-secondary"
+									aria-label="Hủy"
+									class="button-secondary action-icon"
 									onclick={() => (isAddingContact = false)}
-									type="button">Hủy</button
+									title="Hủy"
+									type="button"
+									><svg aria-hidden="true" viewBox="0 0 24 24"
+										><path d="m6 6 12 12M18 6 6 18" /></svg
+									><span class="action-label">Hủy</span></button
 								>
 							</div>
 						</form>
@@ -267,7 +424,16 @@
 								<p class="mt-3 text-sm text-[var(--color-text-muted)]">Chỉnh sửa liên hệ</p>
 								<h2 class="text-lg font-bold">{selectedContact.displayName}</h2>
 							</div>
-							<button class="button-danger" form="delete-contact" type="submit">Xóa</button>
+							<button
+								aria-label="Xóa liên hệ"
+								class="button-danger action-icon"
+								form="delete-contact"
+								title="Xóa liên hệ"
+								type="submit"
+								><svg aria-hidden="true" viewBox="0 0 24 24"
+									><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6" /></svg
+								><span class="action-label">Xóa</span></button
+							>
 						</div>
 						<form class="mt-4 space-y-3" method="POST">
 							<input name="id" type="hidden" value={selectedContact.id} /><label
@@ -294,8 +460,15 @@
 								><span class="label">Ghi chú</span><textarea class="field" name="notes"
 									>{selectedContact.notes ?? ''}</textarea
 								></label
-							><button class="button-primary" formaction="?/updateContact" type="submit"
-								>Lưu thay đổi</button
+							><button
+								aria-label="Lưu thay đổi"
+								class="button-primary action-icon"
+								formaction="?/updateContact"
+								title="Lưu thay đổi"
+								type="submit"
+								><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg><span
+									class="action-label">Lưu thay đổi</span
+								></button
 							>
 						</form>
 						<form
@@ -369,13 +542,34 @@
 						name="name"
 						placeholder="Tên tiểu ban mới"
 						required
-					/><button class="button-primary shrink-0" formaction="?/createDepartment" type="submit"
-						>Thêm</button
+					/><button
+						aria-label="Thêm tiểu ban"
+						class="button-primary action-icon shrink-0"
+						formaction="?/createDepartment"
+						title="Thêm tiểu ban"
+						type="submit"
+						><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg><span
+							class="action-label">Thêm</span
+						></button
 					>
 				</form>
 				<div class="admin-list-scroll mt-5 space-y-2">
-					{#each data.departments as department}<form
+					{#each departmentOrder as department}<form
+							draggable="true"
+							class:drag-over={dragOverDepartmentId === department.id &&
+								draggedDepartmentId !== department.id}
 							class="flex gap-2"
+							ondragend={() => {
+								draggedDepartmentId = null;
+								dragOverDepartmentId = null;
+							}}
+							ondragenter={() => (dragOverDepartmentId = department.id)}
+							ondragover={(event) => event.preventDefault()}
+							ondragstart={() => (draggedDepartmentId = department.id)}
+							ondrop={(event) => {
+								event.preventDefault();
+								void moveDepartmentByDrag(department.id);
+							}}
 							method="POST"
 							onsubmit={(event) => {
 								if (
@@ -390,14 +584,26 @@
 								name="name"
 								value={department.name}
 								required
-							/><button class="button-secondary" formaction="?/updateDepartment" type="submit"
-								>Lưu</button
+							/><span class="drag-handle" aria-hidden="true">⋮⋮</span><button
+								aria-label={`Lưu ${department.name}`}
+								class="button-secondary action-icon"
+								formaction="?/updateDepartment"
+								title="Lưu"
+								type="submit"
+								><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg><span
+									class="action-label">Lưu</span
+								></button
 							><button
-								class="button-danger"
+								aria-label={`Xóa ${department.name}`}
+								class="button-danger action-icon"
 								formaction="?/deleteDepartment"
 								name="intent"
+								title="Xóa"
 								type="submit"
-								value="delete">Xóa</button
+								value="delete"
+								><svg aria-hidden="true" viewBox="0 0 24 24"
+									><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14M10 10v6m4-6v6" /></svg
+								><span class="action-label">Xóa</span></button
 							>
 						</form>{/each}
 				</div>
@@ -431,7 +637,7 @@
 	{/if}
 </main>
 
-{#if data.event && !isContactDetail}
+{#if data.event && !isContactDetail && bulkContactIds.length === 0}
 	<nav aria-label="Điều hướng quản trị" class="admin-bottom-bar lg:hidden">
 		<button
 			class:bottom-active={activeTab === 'contacts'}
@@ -506,6 +712,45 @@
 		border: 1px solid #fecaca;
 		color: #b91c1c;
 	}
+	.action-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.45rem;
+	}
+	.action-icon svg {
+		width: 1.1rem;
+		height: 1.1rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 1.9;
+	}
+	.app-checkbox {
+		width: 1.05rem;
+		height: 1.05rem;
+		margin: 0;
+		border: 1px solid var(--color-border-strong);
+		border-radius: 0.3rem;
+		accent-color: var(--color-primary);
+	}
+	.app-checkbox:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 2px;
+	}
+	@media (max-width: 639px) {
+		.action-label {
+			display: none;
+		}
+		.button-primary.action-icon:not(.w-full),
+		.button-secondary.action-icon:not(.w-full),
+		.button-danger.action-icon:not(.w-full) {
+			width: 2.75rem;
+			padding-right: 0;
+			padding-left: 0;
+		}
+	}
 	.notice {
 		margin-bottom: 1.5rem;
 		border-radius: 0.75rem;
@@ -550,6 +795,18 @@
 	}
 	.contact-row.selected {
 		background: color-mix(in srgb, var(--color-primary) 12%, white);
+	}
+	.drag-handle {
+		display: grid;
+		width: 2rem;
+		place-items: center;
+		color: var(--color-text-muted);
+		letter-spacing: -0.18rem;
+		cursor: grab;
+	}
+	.drag-over {
+		border-top: 3px dashed var(--color-primary);
+		padding-top: 0.45rem;
 	}
 	.admin-list-scroll {
 		max-height: min(60dvh, 38rem);
@@ -684,6 +941,9 @@
 		color: var(--color-primary);
 	}
 	@media (max-width: 1023px) {
+		.contacts-workspace:not(.showing-detail) .contact-editor {
+			display: none;
+		}
 		.contacts-workspace.showing-detail .contact-list {
 			display: none;
 		}

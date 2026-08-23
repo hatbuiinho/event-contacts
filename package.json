@@ -10,7 +10,7 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test:unit": "node --test --experimental-strip-types src/lib/contacts/assignment-text-parser.test.ts src/lib/contacts/import-plan.test.ts src/lib/volunteers/sheet-parser.test.ts src/lib/memorial/sheet-parser.test.ts src/lib/memorial/position-sheet-parser.test.ts",
+		"test:unit": "node --test --experimental-strip-types src/lib/contacts/assignment-text-parser.test.ts src/lib/contacts/import-plan.test.ts src/lib/contacts/normalize.test.ts src/lib/volunteers/sheet-parser.test.ts src/lib/memorial/sheet-parser.test.ts src/lib/memorial/position-sheet-parser.test.ts",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"cap:sync": "yarn build && cap sync",
