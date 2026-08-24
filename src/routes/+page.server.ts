@@ -23,42 +23,29 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			editId: null,
 			query,
 			departmentId,
-			event: null,
-			contacts: [],
-			departments: []
+			directory: null
 		};
 	}
 
-	try {
-		return {
-			configured: true,
-			databaseError: false,
-			isAdmin: locals.user?.role === 'admin',
-			user: locals.user
-				? { displayName: locals.user.displayName, username: locals.user.username }
-				: null,
-			editId,
-			query,
-			departmentId,
-			// The public directory is small enough to search locally after the first SSR response.
-			// Do not make each keystroke wait for a round trip to Neon.
-			...(await getActiveDirectory({ query: '', departmentId: null }))
-		};
-	} catch (error) {
-		console.error('[directory] database connection failed', error);
-		return {
-			configured: true,
-			databaseError: true,
-			isAdmin: false,
-			user: null,
-			editId: null,
-			query,
-			departmentId,
-			event: null,
-			contacts: [],
-			departments: []
-		};
-	}
+	return {
+		configured: true,
+		databaseError: false,
+		isAdmin: locals.user?.role === 'admin',
+		user: locals.user
+			? { displayName: locals.user.displayName, username: locals.user.username }
+			: null,
+		editId,
+		query,
+		departmentId,
+		// Stream this response so the application shell can render before a cold
+		// Neon query completes. The client then keeps searching locally as before.
+		directory: getActiveDirectory({ query: '', departmentId: null })
+			.then((directory) => ({ ...directory, databaseError: false }))
+			.catch((error) => {
+				console.error('[directory] database connection failed', error);
+				return { event: null, contacts: [], departments: [], databaseError: true };
+			})
+	};
 };
 
 export const actions = {

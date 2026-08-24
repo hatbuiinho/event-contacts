@@ -9,22 +9,24 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-	type Directory = Pick<PageData, 'contacts' | 'departments' | 'event'>;
+	type Directory = NonNullable<Awaited<PageData['directory']>>;
 	type DirectoryContact = Directory['contacts'][number];
 	type ContactMembership = DirectoryContact['departments'][number];
 	type DisplayAssignment = { contact: DirectoryContact; membership: ContactMembership };
-	// The full active directory is intentionally used only from the initial SSR response.
-	// Searching and filtering are then instant and do not require a Neon round trip.
+	// The route's data is the initial payload for this page instance.
 	// svelte-ignore state_referenced_locally
 	const initialData = $state.snapshot(data);
-
+	const initialDirectory = initialData.directory as unknown as Promise<Directory> | null;
 	let query = $state(initialData.query);
 	let departmentId = $state(initialData.departmentId ?? '');
 	let directory = $state<Directory>({
-		contacts: initialData.contacts,
-		departments: initialData.departments,
-		event: initialData.event
+		contacts: [],
+		departments: [],
+		event: null,
+		databaseError: false
 	});
+	let directoryLoading = $state(initialData.configured && initialDirectory !== null);
+	let databaseError = $state(false);
 	let editContactId = $state<string | null>(null);
 	let copiedContactId = $state<string | null>(null);
 	let profileMenuOpen = $state(false);
@@ -128,6 +130,16 @@
 	}
 
 	onMount(() => {
+		if (initialDirectory) {
+			void initialDirectory.then((loadedDirectory) => {
+				directory = loadedDirectory;
+				databaseError = loadedDirectory.databaseError;
+				directoryLoading = false;
+			});
+		} else {
+			directoryLoading = false;
+		}
+
 		const updateOffset = () => {
 			stickyGroupOffset = Math.ceil(topbarElement?.getBoundingClientRect().height ?? 0);
 		};
@@ -334,7 +346,17 @@
 				<a class="font-semibold underline" href="/admin/import">trang Import</a>.
 			</p>
 		</section>
-	{:else if data.databaseError}
+	{:else if directoryLoading}
+		<section aria-busy="true" aria-live="polite" class="mt-7 space-y-3">
+			<p class="text-sm font-medium text-[var(--color-text-muted)]">Đang tải danh bạ…</p>
+			<div class="rounded-2xl border border-[var(--color-border)] bg-white p-4">
+				<div class="h-4 w-2/5 animate-pulse rounded bg-[var(--color-surface-muted)]"></div>
+				<div class="mt-4 h-12 animate-pulse rounded-xl bg-[var(--color-surface-muted)]"></div>
+				<div class="mt-3 h-12 animate-pulse rounded-xl bg-[var(--color-surface-muted)]"></div>
+				<div class="mt-3 h-12 animate-pulse rounded-xl bg-[var(--color-surface-muted)]"></div>
+			</div>
+		</section>
+	{:else if databaseError}
 		<section class="mt-7 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950">
 			<h2 class="font-bold">Danh bạ tạm thời chưa kết nối được</h2>
 			<p class="mt-2 text-sm leading-6">
