@@ -68,14 +68,11 @@
 		const groupByDepartmentId = new Map(groups.map((group) => [group.department.id, group]));
 
 		for (const contact of filteredContacts) {
-			// In a regular directory view, show each person only once. During a global
-			// search, every assignment provides useful context, so repeat the person
-			// under each department they belong to.
+			// Every assignment is displayed under its own department. A person assigned
+			// to multiple departments must therefore appear in each relevant section.
 			const memberships = departmentId
 				? contact.departments.filter((item) => item.id === departmentId)
-				: query.trim()
-					? contact.departments
-					: contact.departments.slice(0, 1);
+				: contact.departments;
 
 			for (const membership of memberships) {
 				groupByDepartmentId.get(membership.id)?.assignments.push({ contact, membership });
@@ -99,7 +96,7 @@
 					const groupKey = assignment.membership.groupId ?? '';
 					const roleGroup = roleGroups.get(groupKey) ?? {
 						role,
-						sortOrder: assignment.membership.groupSortOrder ?? Number.MAX_SAFE_INTEGER,
+						sortOrder: assignment.membership.groupSortOrder ?? assignment.membership.sortOrder,
 						contacts: []
 					};
 					roleGroup.contacts.push(assignment.contact);
@@ -353,7 +350,7 @@
 		</section>
 	{:else}
 		<p aria-live="polite" class="mb-4 text-sm text-[var(--color-text-muted)]">
-			{#if query.trim() && !departmentId}
+			{#if !departmentId}
 				{displayedAssignmentCount} phân công · {filteredContacts.length} người phù hợp
 			{:else}
 				{filteredContacts.length} người phù hợp

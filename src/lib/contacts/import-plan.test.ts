@@ -31,5 +31,20 @@ test('turns imported role headings into reusable department groups', () => {
 
 	assert.equal(prepared.groups.length, 1);
 	assert.equal(prepared.groups[0]?.name, 'Điều phối chung');
-	assert.equal(prepared.memberships.every((membership) => membership.groupId === prepared.groups[0]?.id), true);
+	assert.equal(
+		prepared.memberships.every((membership) => membership.groupId === prepared.groups[0]?.id),
+		true
+	);
+});
+
+test('keeps a group after ungrouped assignments at its source position', () => {
+	const prepared = prepareAssignmentImport(`
+TIỂU BAN TRI KHÁCH
++ Thầy A – 0900.000.001
++ Thầy B – 0900.000.002
+- Tiếp đón:
++ Cô C – 0900.000.003
+`);
+
+	assert.equal(prepared.groups[0]?.sortOrder, 2);
 });

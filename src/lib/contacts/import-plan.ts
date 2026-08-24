@@ -68,7 +68,8 @@ export function prepareAssignmentImport(raw: string): PreparedImport {
 	for (const assignment of parse.assignments) {
 		const contact = ensureContact(assignment, contactsByKey);
 		const department = ensureDepartment(assignment, departmentsByName);
-		const group = ensureGroup(assignment, department, groupsByKey);
+		const nextMembershipSortOrder = membershipCountByDepartment.get(department.id) ?? 0;
+		const group = ensureGroup(assignment, department, groupsByKey, nextMembershipSortOrder);
 		if (!assignment.phoneDigits) {
 			missingPhoneCount += 1;
 			needsReviewCount += 1;
@@ -76,7 +77,7 @@ export function prepareAssignmentImport(raw: string): PreparedImport {
 
 		const membershipKey = `${contact.id}:${department.id}:${group?.id ?? ''}`;
 		if (!membershipsByKey.has(membershipKey)) {
-			const sortOrder = membershipCountByDepartment.get(department.id) ?? 0;
+			const sortOrder = nextMembershipSortOrder;
 			membershipsByKey.set(membershipKey, {
 				id: crypto.randomUUID(),
 				contactId: contact.id,
@@ -107,7 +108,8 @@ export function prepareAssignmentImport(raw: string): PreparedImport {
 function ensureGroup(
 	assignment: ParsedAssignment,
 	department: PreparedDepartment,
-	groupsByKey: Map<string, PreparedDepartmentGroup>
+	groupsByKey: Map<string, PreparedDepartmentGroup>,
+	sortOrder: number
 ): PreparedDepartmentGroup | null {
 	const name = assignment.role.trim();
 	if (!name) return null;
@@ -121,8 +123,9 @@ function ensureGroup(
 		departmentId: department.id,
 		name,
 		normalizedName,
-		sortOrder: [...groupsByKey.values()].filter((item) => item.departmentId === department.id)
-			.length
+		// A group's first assignment defines its initial visual position. This keeps
+		// ungrouped rows before/among groups exactly as in the import source.
+		sortOrder
 	};
 	groupsByKey.set(key, group);
 	return group;
