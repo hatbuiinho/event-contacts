@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser, dev } from '$app/environment';
+	import { navigating } from '$app/state';
 	import { onMount } from 'svelte';
 
 	import './layout.css';
@@ -50,5 +51,10 @@
 </svelte:head>
 
 <main class="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
+	{#if navigating.to}
+		<div aria-live="polite" aria-label="Đang chuyển trang" class="route-progress" role="status">
+			<span></span>
+		</div>
+	{/if}
 	{@render children()}
 </main>
